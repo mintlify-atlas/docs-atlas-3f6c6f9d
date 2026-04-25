@@ -1,0 +1,224 @@
+---
+title: "Troubleshooting Podman: common errors and solutions"
+description: "Fix the most common Podman problems: SELinux volume denials, subuid/subgid setup, rootless port limits, container storage errors, and registry config."
+---
+
+This page covers the most common problems encountered when running Podman, along with their causes and solutions. If your issue is not listed here, check the [full troubleshooting guide](https://github.com/containers/podman/blob/main/troubleshooting.md) in the upstream repository and verify you are running the latest available version with `podman version`.
+
+<AccordionGroup>
+  <Accordion title="Permission denied on volume mounts (SELinux)">
+    **Symptom**
+
+    ```console
+    $ podman run -v ~/mycontent:/content fedora touch /content/file
+    touch: cannot touch '/content/file': Permission denied
+    ```
+
+    **Cause**
+
+    On SELinux-enabled systems, files on the host must carry a container-compatible SELinux label before a container process can write to them. Podman does not relabel files automatically.
+
+    **Solution**
+
+    Add the `:Z` or `:z` suffix to the volume mount:
+
+    ```console
+    $ podman run -v ~/mycontent:/content:Z fedora touch /content/file
+    ```
+
+    - `:Z` — labels the directory as a **private** volume. Only the current container can access it.
+    - `:z` — labels the directory as a **shared** volume. Multiple containers can read and write it.
+
+    <Warning>
+    Do not relabel system directories such as `/home` or `/etc`. Relabeling system content can break other confined services on the host.
+    </Warning>
+
+    To disable SELinux separation for a specific container instead of relabeling:
+
+    ```console
+    $ podman run --security-opt label=disable -v ~:/home/user fedora touch /home/user/file
+    ```
+
+    If the container image runs as a specific non-root user (for example, Jupyter's `jovyan` or Postgres's `postgres`), fix the user namespace mapping instead:
+
+    ```console
+    $ podman run -v "$PWD":/home/jovyan/work --userns=keep-id jupyter/scipy-notebook
+    ```
+  </Accordion>
+
+  <Accordion title="rootless setup user: invalid argument (subuid/subgid not configured)">
+    **Symptom**
+
+    ```console
+    $ podman run --rm -ti --user 1000000 alpine echo hi
+    Error: container create failed: container_linux.go:344: starting container process caused "setup user: invalid argument"
+    ```
+
+    **Cause**
+
+    Rootless Podman maps the container's UIDs into a subordinate UID range defined in `/etc/subuid` and `/etc/subgid`. If the user has no entry in these files, or the range is too small to include the UID required by the container image, the namespace setup fails.
+
+    **Solution**
+
+    Check whether the user has entries in `/etc/subuid` and `/etc/subgid`:
+
+    ```console
+    $ cat /etc/subuid
+    johndoe:100000:65536
+    ```
+
+    The format is `USERNAME:STARTING_UID:RANGE_SIZE`.
+
+    Add or extend the ranges using `usermod`:
+
+    ```console
+    # usermod --add-subuids 200000-265535 --add-subgids 200000-265535 johndoe
+    # grep johndoe /etc/subuid /etc/subgid
+    /etc/subuid:johndoe:200000:65536
+    /etc/subgid:johndoe:200000:65536
+    ```
+
+    Make sure the range covers all UIDs used inside the container. After updating the files, stop all containers and migrate the state:
+
+    ```console
+    $ podman system migrate
+    ```
+
+    <Note>
+    If `newuidmap` or `newgidmap` is reported as missing, install the `shadow-utils` package (RHEL/CentOS 7 requires version 7.7 or later).
+    </Note>
+  </Accordion>
+
+  <Accordion title="Cannot bind ports below 1024 as a rootless user">
+    **Symptom**
+
+    ```console
+    $ podman run -p 80:80 nginx
+    Error: rootlessport cannot expose privileged port 80, you can add 'net.ipv4.ip_unprivileged_port_start=80' to /etc/sysctl.conf (currently 1024), or choose a different port
+    ```
+
+    **Cause**
+
+    Linux restricts binding to ports below 1024 to privileged processes. A rootless Podman container running without `CAP_NET_BIND_SERVICE` cannot bind to those ports.
+
+    **Solution: lower the unprivileged port start**
+
+    Allow unprivileged processes to bind to ports starting at 80 (or lower):
+
+    ```console
+    # sysctl -w net.ipv4.ip_unprivileged_port_start=80
+    ```
+
+    To make the change permanent, create a sysctl drop-in:
+
+    ```console
+    # echo "net.ipv4.ip_unprivileged_port_start=80" > /etc/sysctl.d/99-podman-ports.conf
+    # sysctl --system
+    ```
+
+    **Alternative: use a high host port**
+
+    Map the container's port 80 to a high host port that does not require elevated privileges:
+
+    ```console
+    $ podman run -p 8080:80 nginx
+    ```
+
+    Then use a reverse proxy or firewall rule to redirect traffic from port 80 to 8080 on the host.
+  </Accordion>
+
+  <Accordion title="Container storage issues (noexec home directory or graphroot permission denied)">
+    **Symptom — noexec home directory**
+
+    ```console
+    $ podman run centos:7
+    standard_init_linux.go:203: exec user process caused "permission denied"
+    ```
+
+    **Cause**
+
+    The default container storage location (`graphroot`) is under the user's home directory, which is mounted `noexec` on some systems. Podman cannot execute binaries from a `noexec` filesystem.
+
+    **Solution**
+
+    Redirect container storage to a directory on an exec-capable filesystem. Copy the storage configuration to the user level and update `graphroot`:
+
+    ```console
+    $ mkdir -p ~/.config/containers
+    $ cp /etc/containers/storage.conf ~/.config/containers/storage.conf
+    ```
+
+    Edit `~/.config/containers/storage.conf`:
+
+    ```toml
+    [storage]
+    driver = "overlay"
+    runroot = "/run/user/1000"
+    graphroot = "/execdir/myuser/storage"
+      [storage.options]
+      mount_program = "/bin/fuse-overlayfs"
+    ```
+
+    **Symptom — SELinux blocks custom graphroot**
+
+    ```console
+    # podman run -p 5000:5000 -it centos bash
+    bash: error while loading shared libraries: /lib64/libc.so.6: cannot apply additional memory protection after relocation: Permission denied
+    ```
+
+    **Cause**
+
+    When `graphroot` is changed to a non-standard path, SELinux does not automatically apply the correct file context to the new directory.
+
+    **Solution**
+
+    Set up an SELinux equivalence record so the new path inherits the correct labels from `/var/lib/containers`:
+
+    ```console
+    # semanage fcontext -a -e /var/lib/containers /srv/containers
+    # restorecon -R -v /srv/containers
+    ```
+  </Accordion>
+
+  <Accordion title="Pulling images from unqualified registries fails">
+    **Symptom**
+
+    ```console
+    $ podman build -f Dockerfile
+    STEP 1: FROM alpine
+    error building: error creating build container: no such image "alpine" in registry: image not known
+    ```
+
+    Or:
+
+    ```console
+    $ podman pull fedora
+    error pulling image "fedora": unable to pull fedora: error getting default registries to try: Near line 9 (last key parsed ''): Bare keys cannot contain ':'.
+    ```
+
+    **Cause**
+
+    Podman does not know which registries to search for unqualified image names. Either `/etc/containers/registries.conf` is missing, the `unqualified-search-registries` list is empty, or the file contains a syntax error.
+
+    **Solution**
+
+    Verify the file exists and contains a valid `unqualified-search-registries` entry:
+
+    ```console
+    $ cat /etc/containers/registries.conf | grep unqualified
+    unqualified-search-registries = ["registry.fedoraproject.org", "quay.io", "docker.io"]
+    ```
+
+    If the file is missing, install the `containers-common` package for your distribution.
+
+    If the file has a syntax error (the "Bare keys cannot contain ':'" message), open it and look for a stray colon inside a key name on the line indicated by the error.
+
+    For the most reliable behavior, use fully qualified image names in your `FROM` instructions and `podman run` commands:
+
+    ```console
+    $ podman pull docker.io/library/alpine:latest
+    ```
+
+    See [Configuring registries](/configuration/registries) for details on setting up `registries.conf`.
+  </Accordion>
+</AccordionGroup>

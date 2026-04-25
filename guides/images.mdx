@@ -1,0 +1,222 @@
+---
+title: "Pull, build, and manage container images in Podman"
+description: "Pull, build, inspect, tag, and remove OCI images with Podman. Includes a working Containerfile example and guidance on pruning dangling layers."
+---
+
+Container images are read-only templates that define the filesystem, runtime configuration, and entry point for containers. Podman stores images locally after pulling them from a registry or building them from a Containerfile. This guide covers all the essential image operations you'll use day to day.
+
+## Pulling images
+
+`podman pull` copies an image from a registry to local storage. If no tag is specified, Podman defaults to `latest`.
+
+<CodeGroup>
+
+```bash pull by name
+podman pull docker.io/nginx
+```
+
+```bash pull a specific tag
+podman pull docker.io/nginx:1.27
+```
+
+```bash pull by digest
+podman pull docker.io/nginx@sha256:a484819eb60211f5299034ac80f6a681b06f89e65866ce91f356ed7c72af059c
+```
+
+</CodeGroup>
+
+<Note>
+  Short-name references (for example, `fedora` without a registry prefix) trigger Podman to resolve the registry interactively or via `short-name-aliases.conf`. Use fully qualified names in scripts to avoid prompts.
+</Note>
+
+## Listing local images
+
+Display all images in local storage:
+
+```bash
+podman images
+```
+
+Show only image IDs (useful for scripting):
+
+```bash
+podman images -q
+```
+
+Filter to images from a specific repository:
+
+```bash
+podman images docker.io/nginx
+```
+
+Typical output looks like:
+
+```text
+REPOSITORY               TAG         IMAGE ID      CREATED       SIZE
+docker.io/library/nginx  latest      a72860cb95fd  2 weeks ago   192 MB
+docker.io/library/nginx  1.27        3b25b682ea82  2 weeks ago   192 MB
+```
+
+## Inspecting images
+
+`podman inspect` returns full metadata for an image as JSON, including environment variables, exposed ports, entry point, and layer history:
+
+```bash
+podman inspect docker.io/nginx
+```
+
+Extract a specific field with `--format`:
+
+```bash
+podman inspect --format '{{.Os}}/{{.Architecture}}' docker.io/nginx
+```
+
+View the layer history of an image:
+
+```bash
+podman history docker.io/nginx
+```
+
+## Building from a Containerfile
+
+`podman build` constructs a new image from a Containerfile (or Dockerfile). Containerfiles use the same syntax as Dockerfiles.
+
+<Steps>
+  <Step title="Write a Containerfile">
+    Create a `Containerfile` in your project directory:
+
+    ```dockerfile
+    FROM docker.io/nginx:1.27
+
+    # Copy custom site content
+    COPY ./site /usr/share/nginx/html
+
+    # Set an environment variable
+    ENV APP_ENV=production
+
+    # Expose the HTTP port
+    EXPOSE 80
+    ```
+  </Step>
+
+  <Step title="Build the image">
+    Run `podman build` from the directory containing the Containerfile. Use `-t` to tag the result:
+
+    ```bash
+    podman build -t myapp:1.0 .
+    ```
+
+    To point to a Containerfile in a different location:
+
+    ```bash
+    podman build -f /path/to/Containerfile -t myapp:1.0 .
+    ```
+  </Step>
+
+  <Step title="Verify the build">
+    Confirm the new image appears in local storage:
+
+    ```bash
+    podman images myapp
+    ```
+  </Step>
+</Steps>
+
+<Tip>
+  Podman sources its build implementation from Buildah. You can use `podman build` and `buildah bud` interchangeably in most workflows.
+</Tip>
+
+## Tagging images
+
+`podman tag` adds a new name or tag to an existing local image. The original image is unchanged.
+
+```bash
+podman tag myapp:1.0 myapp:latest
+```
+
+Tag an image for a remote registry before pushing:
+
+```bash
+podman tag myapp:1.0 registry.example.com/myteam/myapp:1.0
+```
+
+Tag using a short image ID:
+
+```bash
+podman tag 0e3bbc2 myapp:stable
+```
+
+<Note>
+  Tagging does not copy any data. Both names point to the same underlying image layers.
+</Note>
+
+## Removing images
+
+<Tabs>
+  <Tab title="Remove by name or ID">
+    Remove a single image:
+
+    ```bash
+    podman rmi docker.io/nginx:1.27
+    ```
+
+    Remove multiple images in one command:
+
+    ```bash
+    podman rmi c4dfb1609ee2 93fd78260bd1
+    ```
+  </Tab>
+
+  <Tab title="Force removal">
+    If containers are using the image, add `--force` to remove the image and all dependent containers:
+
+    ```bash
+    podman rmi --force docker.io/nginx
+    ```
+  </Tab>
+
+  <Tab title="Remove all images">
+    Remove every image in local storage (use with caution):
+
+    ```bash
+    podman rmi -a -f
+    ```
+  </Tab>
+</Tabs>
+
+## Pruning dangling images
+
+Dangling images are layers that have no tag and are not referenced by any other image. They accumulate after rebuilds.
+
+List dangling images:
+
+```bash
+podman images --filter dangling=true
+```
+
+Remove all dangling images:
+
+```bash
+podman image prune
+```
+
+<Warning>
+  `podman image prune` removes all untagged images with no active container references. Pass `--all` to also remove tagged images that have no running containers — review the list carefully before confirming.
+</Warning>
+
+## Reference
+
+<CardGroup cols={2}>
+  <Card title="podman pull" icon="arrow-down-to-bracket">
+    Pull an image from a registry: `podman pull [options] source`
+  </Card>
+  <Card title="podman images" icon="images">
+    List locally stored images: `podman images [options] [image]`
+  </Card>
+  <Card title="podman build" icon="hammer">
+    Build from a Containerfile: `podman build [options] [context]`
+  </Card>
+  <Card title="podman rmi" icon="trash">
+    Remove local images: `podman rmi [options] image [...]`
+  </Card>
+</CardGroup>

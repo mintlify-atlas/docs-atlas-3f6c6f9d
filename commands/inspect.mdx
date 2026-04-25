@@ -1,0 +1,128 @@
+---
+title: "podman inspect — Display detailed configuration and state"
+description: "Return low-level JSON metadata for containers, images, volumes, networks, pods, and artifacts. Supports Go template output to extract specific fields."
+---
+
+`podman inspect` displays detailed configuration and runtime state for Podman objects — containers, images, volumes, networks, pods, or OCI artifacts — identified by name or ID. By default the output is a JSON array. A Go template can be passed via `--format` to extract a single field or produce custom human-readable output.
+
+## Synopsis
+
+```bash
+podman inspect [options] NAME [NAME...]
+```
+
+## Description
+
+When the `--type` flag is not specified, Podman searches for the given name in the following order: containers, images, volumes, networks, pods, then artifacts. If a container and an image share the same name, the container's JSON is returned first. Multiple names or IDs can be inspected in a single call; the output is always a JSON array, or a stream of template-rendered lines when `--format` is used.
+
+<Note>
+Subcommand-specific inspect variants (`podman container inspect`, `podman image inspect`, `podman volume inspect`, etc.) are available and restrict the search to a single object type, avoiding ambiguity.
+</Note>
+
+## Key flags
+
+<ParamField path="--format, -f" type="string">
+  Format the output using a Go template instead of printing raw JSON. The top-level keys of the returned JSON object can be used directly as template fields. For nested fields, use dot notation: `{{.GraphDriver.Name}}`, `{{.State.OOMKilled}}`.
+
+  Pass `--format json` to pretty-print the full JSON structure.
+</ParamField>
+
+<ParamField path="--type, -t" type="string" default="all">
+  Restrict inspection to a specific object type. Valid values: `container`, `image`, `volume`, `network`, `pod`, `artifact`, or `all`. When `all` is used, the search order is: containers → images → volumes → networks → pods → artifacts.
+</ParamField>
+
+<ParamField path="--size, -s" type="boolean" default="false">
+  When inspecting a container, include the total size of its writable layer in the output. Has no effect when inspecting other object types.
+</ParamField>
+
+<ParamField path="--latest, -l" type="boolean" default="false">
+  Inspect the most recently created container. Not available with the remote Podman client on Mac or Windows (excluding WSL2).
+</ParamField>
+
+## Examples
+
+### Inspect a container (full JSON)
+
+```bash
+podman inspect mycontainer
+```
+
+### Inspect an image
+
+```bash
+podman inspect fedora
+```
+
+### Extract a single field with a Go template
+
+Get the image name used by a container:
+
+```bash
+podman inspect mycontainer --format "{{.ImageName}}"
+```
+
+Get the storage driver name for an image:
+
+```bash
+podman inspect fedora --format "{{.GraphDriver.Name}}"
+```
+
+Check whether a container was killed by the OOM killer:
+
+```bash
+podman container inspect mycontainer --format "{{.State.OOMKilled}}"
+```
+
+List the Linux capabilities effective for a container:
+
+```bash
+podman container inspect mycontainer --format "{{.EffectiveCaps}}"
+```
+
+### Inspect a specific object type
+
+Inspect a named volume:
+
+```bash
+podman inspect myvolume --type volume --format "{{.Name}}"
+```
+
+Inspect a network:
+
+```bash
+podman inspect mynetwork --type network --format "{{.name}}"
+```
+
+Inspect a pod:
+
+```bash
+podman inspect mypod --type pod --format "{{.Name}}"
+```
+
+### Inspect an image's size
+
+```bash
+podman image inspect --format "size: {{.Size}}" alpine
+```
+
+### Inspect multiple containers at once
+
+```bash
+podman inspect container1 container2 container3
+```
+
+### Inspect the latest container
+
+```bash
+podman container inspect --latest --format "{{.Name}}: {{.State.Status}}"
+```
+
+### Inspect an OCI artifact
+
+```bash
+podman inspect quay.io/myimage/myartifact:latest --type artifact
+```
+
+<Tip>
+To explore available template fields for an object type, run `podman inspect NAME` without `--format` and browse the JSON output. Every top-level key is a valid template field, and nested structures can be accessed with dot notation.
+</Tip>

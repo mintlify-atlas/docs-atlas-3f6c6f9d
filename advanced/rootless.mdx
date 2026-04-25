@@ -1,0 +1,199 @@
+---
+title: "Running Rootless Podman With Linux User Namespaces"
+description: "Learn how rootless Podman uses user namespaces, configure /etc/subuid and /etc/subgid, set up pasta networking, and understand known limitations."
+---
+
+Rootless Podman lets unprivileged users build and run containers without any elevated permissions. Rather than relying on a root-owned daemon, Podman uses Linux user namespaces to shift a block of UIDs and GIDs assigned to your account — allowing processes inside the container to appear as different users while remaining safely mapped to your own UID on the host.
+
+## How user namespaces work
+
+When you run a container as a non-root user, Podman uses the `newuidmap` and `newgidmap` helper programs to create a user namespace. Inside that namespace, the container's root user (UID 0) maps to your real UID on the host. Every other UID in the container maps to a subordinate UID range allocated to you in `/etc/subuid` and `/etc/subgid`.
+
+For example, if you mount a host directory into a container and create a file as root inside the container, that file will be owned by your unprivileged host user when viewed from outside:
+
+```bash
+host$ whoami
+john
+
+host$ ls /home/john/folder
+host$ podman run -it -v /home/john/folder:/container/volume mycontainer /bin/bash
+
+root@container# touch /container/volume/test
+root@container# exit
+
+host$ ls -l /home/john/folder
+total 0
+-rw-r--r-- 1 john john 0 May 20 21:47 test
+```
+
+To keep your UID the same inside and outside the container, use `--userns=keep-id`. This is required when the container image runs as a non-root `USER` and needs to access mounted volumes.
+
+## Administrator setup
+
+Before users can run rootless containers, the system administrator must complete two configuration steps.
+
+<Steps>
+  <Step title="Install a networking tool">
+    Rootless Podman requires a user-mode networking tool. As of Podman 5.0, [pasta](https://passt.top/passt/about/#pasta) (from the `passt` package) is the default. Install it using your distribution's package manager:
+
+    <Tabs>
+      <Tab title="Fedora / RHEL">
+        ```bash
+        sudo dnf install passt
+        ```
+      </Tab>
+      <Tab title="Debian / Ubuntu">
+        ```bash
+        sudo apt install passt
+        ```
+      </Tab>
+      <Tab title="openSUSE">
+        ```bash
+        sudo zypper install passt
+        ```
+      </Tab>
+    </Tabs>
+  </Step>
+
+  <Step title="Configure subordinate UID/GID ranges">
+    Each user who will run containers must have entries in `/etc/subuid` and `/etc/subgid`. These files are provided by the `shadow-utils` or `newuid` package. Each user's range must be unique to avoid namespace collisions.
+
+    The format is `USERNAME:STARTING_UID:RANGE_SIZE`:
+
+    ```text
+    # /etc/subuid
+    johndoe:100000:65536
+    test:165536:65536
+    ```
+
+    Use `usermod` to add entries without editing the files directly:
+
+    ```bash
+    sudo usermod --add-subuids 100000-165535 --add-subgids 100000-165535 johndoe
+    ```
+
+    Verify the result:
+
+    ```bash
+    grep johndoe /etc/subuid /etc/subgid
+    /etc/subuid:johndoe:100000:65536
+    /etc/subgid:johndoe:100000:65536
+    ```
+
+    <Note>
+      If you modify `/etc/subuid` or `/etc/subgid` for a user who already has running containers, stop those containers and run `podman system migrate` as that user to apply the new mapping.
+    </Note>
+
+    Starting with shadow-utils 4.9, you can also source subordinate ID ranges from a central directory service. Add `subid: sss` to `/etc/nsswitch.conf` to retrieve ranges from SSSD (which supports FreeIPA via SSSD 2.6.0 and generic LDAP via SSSD 2.12.0).
+  </Step>
+</Steps>
+
+## User configuration
+
+Once administrator setup is complete, you can run any Podman command as your normal user — no flags or extra steps required:
+
+```bash
+podman run -it docker.io/library/alpine sh
+```
+
+### Configuration file locations
+
+Rootless Podman reads configuration from per-user directories rather than system-wide paths:
+
+| File | Rootless path |
+|------|--------------|
+| `containers.conf` | `~/.config/containers/containers.conf` |
+| `storage.conf` | `~/.config/containers/storage.conf` |
+| `registries.conf` | `~/.config/containers/registries.conf` |
+| Auth tokens | `$XDG_RUNTIME_DIR/containers/auth.json` |
+
+In rootless mode, container storage defaults to `~/.local/share/containers/storage` and the run directory defaults to `/run/user/$UID/containers`.
+
+### Giving access to additional groups
+
+You can map additional host groups into a container namespace by subordinating them to your user first:
+
+```bash
+sudo usermod --add-subgids 2000-2000 johndoe
+```
+
+Then use `--group-add keep-groups` and `--gidmap` when running the container:
+
+```bash
+podman run \
+  --rm \
+  --group-add keep-groups \
+  --gidmap="+g102000:@2000" \
+  --volume "$PWD:/data:ro" \
+  --workdir /data \
+  alpine ls -lisa
+```
+
+## Rootless networking with pasta
+
+Pasta copies the IP address of your main network interface into the container's namespace, giving it full IPv6 and IPv4 connectivity. Since Podman 5.3, host-to-container communication is improved; earlier versions required explicit pasta configuration for inter-container traffic.
+
+<Note>
+  As of Podman 5.0, pasta is the default networking tool for rootless containers. If you relied on port-forwarded containers talking to each other by IP in earlier versions, review the [Podman 5.0 breaking changes](https://blog.podman.io/2024/03/podman-5-0-breaking-changes-in-detail/) post for migration guidance.
+</Note>
+
+## Known limitations
+
+The following restrictions apply when running Podman as a non-root user. Many are kernel-level constraints that cannot be worked around by Podman.
+
+<AccordionGroup>
+  <Accordion title="Port binding below 1024">
+    The kernel does not allow processes without `CAP_NET_BIND_SERVICE` to bind to privileged ports. You can lower the boundary with:
+
+    ```bash
+    sysctl net.ipv4.ip_unprivileged_port_start=443
+    ```
+
+    Alternatively, use a proxy, firewall rule, or redirection tool such as [redir](https://github.com/troglobit/redir) to forward traffic from a privileged port to an unprivileged one.
+  </Accordion>
+
+  <Accordion title="Missing /etc/subuid or /etc/subgid entries">
+    If an administrator has not configured subordinate UID/GID ranges for your user, Podman commands will fail. Some identity providers (for example, FreeIPA) support subordinate ID integration, but many do not and require manual `/etc/subuid`/`/etc/subgid` configuration.
+  </Accordion>
+
+  <Accordion title="No resource limits on cgroups v1 systems">
+    Setting resource limits on containers (CPU, memory, etc.) requires cgroups v2. Rootless Podman has no support for resource limits on older systems using cgroups v1.
+  </Accordion>
+
+  <Accordion title="Certain systemd unit options do not work">
+    Some systemd service options are incompatible inside rootless containers. For example, `PrivateNetwork=yes` will cause service startup failures. The recommended fix is to add an override drop-in that sets `PrivateNetwork=no` rather than passing `--cap-add SYS_ADMIN`.
+  </Accordion>
+
+  <Accordion title="Container images cannot easily be shared between users">
+    Images stored in a rootless user's local storage are not accessible to other users. Sharing content through additional stores is also difficult in this environment.
+  </Accordion>
+
+  <Accordion title="Does not work on NFS or parallel filesystems">
+    NFS and parallel filesystems such as GPFS enforce file creation by UID on the server side and do not understand Linux user namespaces. When a container root process attempts to create a file owned by a different UID, the server will deny the operation.
+  </Accordion>
+
+  <Accordion title="Home directory requirements">
+    Rootless Podman requires a writable home directory that is not mounted with `noexec` or `nodev`. If your home directory has these mount options, configure storage to point to a different writable path.
+  </Accordion>
+
+  <Accordion title="Overlay storage driver requirements">
+    Native overlayfs as an unprivileged user requires Podman >= 3.1 and Linux kernel >= 5.12. On older systems, the slower `fuse-overlayfs` is used instead. Only the overlay and VFS storage drivers are supported in rootless mode.
+  </Accordion>
+
+  <Accordion title="Commands with reduced functionality">
+    - Directories created by `podman mount` and `podman unmount` are only visible inside the rootless user namespace, accessible with `podman unshare`.
+    - `podman container checkpoint` and `podman container restore` require root (CRIU requires root).
+  </Accordion>
+
+  <Accordion title="UID/GID range limited to 65536">
+    A standard rootless configuration gives containers access to at most 65536 UIDs and GIDs. Images whose content uses higher UIDs or GIDs cannot be used, and builds that attempt to assign UIDs outside the mapped range will fail.
+  </Accordion>
+
+  <Accordion title="Cannot create device nodes">
+    The kernel does not allow processes without `CAP_MKNOD` to create device nodes, even inside a privileged container. If a container must create device nodes, it must be run as root.
+  </Accordion>
+</AccordionGroup>
+
+<Warning>
+  Running `podman` as root and running it rootless use different storage locations, networks, and configuration files. Images and containers created as root are not visible to rootless users, and vice versa.
+</Warning>

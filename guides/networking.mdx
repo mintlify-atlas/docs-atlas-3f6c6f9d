@@ -1,0 +1,258 @@
+---
+title: "Podman container networking: bridge, pasta, and macvlan"
+description: "Configure bridge, pasta, and macvlan networks for rootful and rootless Podman containers. Map ports, create networks, and enable DNS between containers."
+---
+
+Podman provides flexible container networking that works differently depending on whether you run containers as root or as a regular user. Rootful containers default to the **netavark** bridge backend, giving each container a routable IP address via NAT. Rootless containers default to **pasta**, a user-mode networking stack that requires no host-level interface changes. Understanding this distinction is the foundation for every networking decision you'll make with Podman.
+
+## Rootful vs rootless networking
+
+<CardGroup cols={2}>
+  <Card title="Rootful (netavark)" icon="shield-halved">
+    Creates a real bridge interface on the host. Containers get IP addresses routable within the virtual network, with outbound NAT to the internet. Supports DNS resolution between containers on the same network.
+  </Card>
+  <Card title="Rootless (pasta)" icon="user">
+    Runs entirely in user space with no host interface required. Containers share the host's IP via a TAP device and user-mode TCP/IP stack. Containers are isolated from each other by default — communicate via pod shared namespaces or host port mappings.
+  </Card>
+</CardGroup>
+
+<Note>
+Rootless users must use ports 1024–65535 for host-side port mappings, since binding to lower ports requires `CAP_NET_BIND_SERVICE`. You can adjust this limit with `sysctl net.ipv4.ip_unprivileged_port_start`.
+</Note>
+
+## Default network
+
+When Podman runs as root, it uses the built-in `podman` bridge network backed by netavark. This network uses `10.88.0.0/16` as its subnet. The default network is memory-only and does not support container DNS resolution (for Docker compatibility).
+
+To make the default rootful network persistent and editable:
+
+```bash
+podman network inspect podman | jq .[] > /etc/containers/networks/podman.json
+```
+
+For the rootless default network:
+
+```bash
+podman network inspect podman | jq .[] > ~/.local/share/containers/storage/networks/podman.json
+```
+
+## Port mapping
+
+Use the `-p` flag to map a host port to a container port. The format is `HOST_PORT:CONTAINER_PORT`.
+
+<Tabs>
+  <Tab title="Rootful">
+    ```bash
+    sudo podman run -d --name webserver -p 8080:80 quay.io/libpod/banner
+    ```
+    Access the container from outside the host at the host's IP on port 8080.
+  </Tab>
+  <Tab title="Rootless">
+    ```bash
+    podman run -d --name webserver -p 8080:80 quay.io/libpod/banner
+    ```
+    Rootless containers must map to unprivileged ports (≥ 1024) on the host side.
+  </Tab>
+</Tabs>
+
+Verify the server responds:
+
+```bash
+curl http://192.168.99.109:8080
+```
+
+## Networking modes
+
+<AccordionGroup>
+  <Accordion title="Bridge (default for rootful)">
+    Bridge networking creates a virtual network interface on the host. Containers on the same bridge can communicate with each other by IP address or DNS name (if DNS is enabled). Outbound traffic is NATed through the host.
+
+    This is the default when running as root. You can also create additional bridge networks with `podman network create`.
+
+    ```bash
+    # Use the default bridge network (rootful)
+    sudo podman run -d --name app --network podman nginx
+    ```
+  </Accordion>
+  <Accordion title="Pasta (default for rootless)">
+    Pasta creates a TAP device in the container's network namespace and provides a user-mode TCP/IP stack. It copies IP addresses from the host's main interface into the container namespace.
+
+    Because there is no shared virtual network, rootless containers using pasta cannot reach each other directly by IP. To communicate between two rootless containers, use the host's IP address and port mappings, or place them in a shared pod.
+
+    ```bash
+    # Run two rootless containers and communicate via host IP
+    podman run -d --name webserver -p 8080:80 quay.io/libpod/banner
+    podman run -it quay.io/libpod/banner curl http://192.168.99.109:8080
+    ```
+  </Accordion>
+  <Accordion title="Macvlan">
+    Macvlan forwards an entire host network interface into the container, giving it a MAC and IP address on the same physical network as the host. Outside clients can reach the container directly by its IP — no port mapping needed.
+
+    Macvlan requires root privileges. Specify the host parent interface with `-o parent=`.
+
+    ```bash
+    sudo podman network create -d macvlan -o parent=eth0 webnetwork
+    sudo podman run -d --name webserver --network webnetwork quay.io/libpod/banner
+    ```
+
+    <Warning>
+    The `macvlan` and `ipvlan` drivers do not support port forwarding. Rootless users cannot use these drivers because they require access to host network interfaces.
+    </Warning>
+  </Accordion>
+  <Accordion title="Internal networks">
+    Add `--internal` when creating a bridge network to block all external access. Containers on an internal network can only communicate with each other. No default route is added inside the container.
+
+    ```bash
+    podman network create --internal isolatednet
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Creating custom networks
+
+Use `podman network create` to define networks with custom subnets, gateways, and DNS settings. If you provide no options, Podman picks a free subnet automatically (from `10.89.0.0/24` to `10.255.255.0/24`).
+
+<Steps>
+  <Step title="Create a network with auto-assigned subnet">
+    ```bash
+    podman network create
+    ```
+    Podman prints the generated network name.
+  </Step>
+  <Step title="Create a named network with a specific subnet">
+    ```bash
+    podman network create --subnet 192.168.33.0/24 mynetwork
+    ```
+  </Step>
+  <Step title="Create a network with subnet, gateway, and IP range">
+    ```bash
+    podman network create \
+      --subnet 192.168.55.0/24 \
+      --gateway 192.168.55.1 \
+      --ip-range 192.168.55.128/25 \
+      mynetwork
+    ```
+  </Step>
+  <Step title="Create a dual-stack (IPv4 + IPv6) network">
+    ```bash
+    podman network create \
+      --subnet 192.168.55.0/24 \
+      --gateway 192.168.55.3 \
+      --subnet fd52:2a5a:747e:3acd::/64 \
+      --gateway fd52:2a5a:747e:3acd::10 \
+      dualstacknet
+    ```
+  </Step>
+</Steps>
+
+<Tip>
+For rootless bridge networking, create a network first — there is no default network pre-configured. Once created, the experience is nearly identical to rootful netavark.
+</Tip>
+
+## Connecting containers to networks
+
+You can attach a container to a network at creation time with `--network`, or connect and disconnect running containers with `podman network connect` and `podman network disconnect`.
+
+<CodeGroup>
+
+```bash attach at creation
+podman run -d --name app --network mynetwork nginx
+```
+
+```bash connect a running container
+podman network connect mynetwork app
+```
+
+```bash disconnect a running container
+podman network disconnect mynetwork app
+```
+
+</CodeGroup>
+
+A container can be connected to multiple networks simultaneously. Each network connection gets a separate interface inside the container.
+
+## DNS between containers
+
+On bridge networks created with `podman network create`, DNS resolution is enabled by default using [aardvark-dns](https://github.com/containers/aardvark-dns). Containers on the same network can reach each other by container name.
+
+```bash
+# Create a network with DNS (default for new networks)
+podman network create appnet
+
+# Start a database container
+podman run -d --name db --network appnet postgres:16
+
+# Start a web container — reach 'db' by name
+podman run -d --name web --network appnet -e DB_HOST=db myapp
+```
+
+<Warning>
+The default `podman` bridge network does **not** enable DNS for backwards compatibility with Docker. Create a new network with `podman network create` to get DNS resolution.
+</Warning>
+
+To disable DNS on a custom network, pass `--disable-dns` at creation time:
+
+```bash
+podman network create --disable-dns nodnsnet
+```
+
+To set a custom DNS server for a network:
+
+```bash
+podman network create --dns 1.1.1.1 mynetwork
+```
+
+## Inspecting networks
+
+<Steps>
+  <Step title="List all networks">
+    ```bash
+    podman network ls
+    ```
+  </Step>
+  <Step title="Inspect a network">
+    ```bash
+    podman network inspect mynetwork
+    ```
+    This outputs the full network configuration as JSON, including subnet, gateway, DNS settings, and connected containers.
+  </Step>
+  <Step title="Check if a network exists">
+    ```bash
+    podman network exists mynetwork
+    ```
+    Returns exit code 0 if the network exists, 1 if it does not.
+  </Step>
+  <Step title="Remove a network">
+    ```bash
+    podman network rm mynetwork
+    ```
+  </Step>
+  <Step title="Remove all unused networks">
+    ```bash
+    podman network prune
+    ```
+  </Step>
+</Steps>
+
+## Pod networking
+
+All containers inside a Podman pod share the same network namespace — they have the same IP address, MAC address, and port mappings. Containers within a pod communicate with each other over `localhost`.
+
+```bash
+# Create a pod with a port mapping
+podman pod create --name mypod -p 8080:80
+
+# Add containers to the pod
+podman run -d --pod mypod --name web nginx
+podman run -d --pod mypod --name app mybackend
+```
+
+The `web` and `app` containers can reach each other on `localhost`. External traffic on port 8080 reaches the pod's network namespace.
+
+## Firewall considerations
+
+Netavark adds iptables rules to support NAT and port forwarding. Reloading the firewall (e.g., `firewall-cmd --reload`) can delete these rules and break network connectivity for running rootful containers. Restore them without restarting containers:
+
+```bash
+podman network reload --all
+```

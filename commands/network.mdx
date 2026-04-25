@@ -1,0 +1,232 @@
+---
+title: "podman network — Create and manage container networks"
+description: "Reference for podman network subcommands. Create and manage networks using the Netavark backend, with support for bridge, macvlan, and ipvlan drivers."
+---
+
+Podman manages container networking through [Netavark](https://github.com/containers/netavark), a Rust-based network stack that replaced CNI plugins in Podman v4. Networks define how containers communicate with each other and with the outside world. The default bridge network (`podman`) uses the `10.88.0.0/16` subnet for root containers. Rootless containers use Pasta by default, which copies IPs directly from the host interface without NAT.
+
+## Subcommands
+
+| Subcommand | Description |
+|---|---|
+| `connect` | Connect a running container to a network. |
+| `create` | Create a new network. |
+| `disconnect` | Disconnect a container from a network. |
+| `exists` | Check if a network exists. |
+| `inspect` | Display configuration for one or more networks. |
+| `ls` | List all networks. |
+| `prune` | Remove all unused networks. |
+| `reload` | Reload network configuration for running containers. |
+| `rm` | Remove one or more networks. |
+| `update` | Update settings on an existing network. |
+
+## network create
+
+Creates a network configuration for use by containers. The default driver is `bridge`. If no subnet is provided, Podman picks a free subnet from `10.89.0.0/24` to `10.255.255.0/24`.
+
+### Key flags
+
+<AccordionGroup>
+  <Accordion title="--driver / -d">
+    Select the network driver. Available options are `bridge` (default), `macvlan`, and `ipvlan`. Additional plugin drivers can be registered via Netavark and listed with `podman info --format {{.Plugins.Network}}`.
+
+    <Note>
+    `macvlan` and `ipvlan` drivers do not support port forwarding. They also require root privileges because rootless networking requires a separate network namespace.
+    </Note>
+
+    ```bash
+    # Create a macvlan network (root only)
+    sudo podman network create -d macvlan -o parent=eth0 --subnet 192.168.1.0/24 mymacvlan
+    ```
+  </Accordion>
+
+  <Accordion title="--subnet">
+    Specify the subnet in CIDR notation. Can be specified multiple times for dual-stack (IPv4 + IPv6) networks. The order of `--subnet`, `--gateway`, and `--ip-range` must match across flags.
+
+    ```bash
+    podman network create --subnet 172.20.0.0/16 mynet
+    ```
+  </Accordion>
+
+  <Accordion title="--gateway">
+    Set an explicit gateway for the subnet. Requires `--subnet`.
+
+    ```bash
+    podman network create --subnet 192.168.10.0/24 --gateway 192.168.10.1 mynet
+    ```
+  </Accordion>
+
+  <Accordion title="--ip-range">
+    Restrict container IP allocation to a sub-range of the subnet. Accepts CIDR or `<startIP>-<endIP>` syntax.
+
+    ```bash
+    podman network create --subnet 192.168.55.0/24 --ip-range 192.168.55.100-192.168.55.200 mynet
+    ```
+  </Accordion>
+
+  <Accordion title="--ipv6">
+    Enable dual-stack networking. If no subnets are given, Podman automatically allocates both an IPv4 and an IPv6 subnet.
+
+    ```bash
+    podman network create --ipv6 --subnet 2001:db8::/64 myipv6net
+    ```
+  </Accordion>
+
+  <Accordion title="--internal">
+    Isolate the network from external traffic. Containers on an internal bridge network cannot reach the internet or other networks; aardvark-dns resolves only container names within the network.
+
+    ```bash
+    podman network create --internal --subnet 10.100.0.0/24 isolated
+    ```
+  </Accordion>
+
+  <Accordion title="--disable-dns">
+    Disable the container-to-container DNS plugin for this network. Only relevant on `bridge` networks; other drivers have DNS disabled by default.
+
+    ```bash
+    podman network create --disable-dns nodns-net
+    ```
+  </Accordion>
+
+  <Accordion title="--opt / -o">
+    Set driver-specific options such as `mtu`, `metric`, `vlan`, `isolate`, `no_default_route`, and others.
+
+    ```bash
+    # Set MTU to 9000 (jumbo frames)
+    podman network create --opt mtu=9000 jumbo-net
+    ```
+  </Accordion>
+</AccordionGroup>
+
+### Examples
+
+```bash
+# Create a network with auto-assigned subnet
+podman network create mynet
+
+# Create a network with a specific subnet
+podman network create --subnet 192.5.0.0/16 mynet
+
+# Create a dual-stack network
+podman network create \
+  --subnet 192.168.55.0/24 --gateway 192.168.55.3 \
+  --subnet fd52:2a5a:747e:3acd::/64 --gateway fd52:2a5a:747e:3acd::10 \
+  dualstack
+
+# Create an IPv6-only network
+podman network create --subnet 2001:db8::/64 --ipv6 ipv6net
+
+# Create an internal (isolated) network
+podman network create --internal --subnet 10.100.0.0/24 isolated
+
+# Create a macvlan network on a specific parent interface (root only)
+sudo podman network create -d macvlan -o parent=eth0 --subnet 192.5.0.0/16 macvlan-net
+
+# Create a network with a static route
+podman network create --subnet 192.168.33.0/24 --route 10.1.0.0/24,192.168.33.10 routed-net
+```
+
+## network ls
+
+List all networks along with their driver and subnet.
+
+```bash
+# List all networks
+podman network ls
+
+# Filter to only bridge networks
+podman network ls --filter driver=bridge
+
+# Show only network names
+podman network ls -q
+```
+
+## network inspect
+
+Return full JSON configuration for one or more networks.
+
+```bash
+# Inspect a single network
+podman network inspect mynet
+
+# Inspect multiple networks
+podman network inspect mynet isolated
+
+# Extract the subnet of a network
+podman network inspect --format '{{range .Subnets}}{{.Subnet}}{{end}}' mynet
+```
+
+## network connect and disconnect
+
+Attach a running container to an additional network or detach it. A container must be running to use these commands.
+
+```bash
+# Connect a running container to a network
+podman network connect mynet mycontainer
+
+# Connect with a specific IP address
+podman network connect --ip 192.5.0.10 mynet mycontainer
+
+# Disconnect a container from a network
+podman network disconnect mynet mycontainer
+
+# Force-disconnect even if the container is not running
+podman network disconnect --force mynet mycontainer
+```
+
+## network rm
+
+Remove one or more networks. Fails if the network is currently used by a container.
+
+<Warning>
+You cannot remove a network that is currently in use. Stop or remove all associated containers first, or use `--force`.
+</Warning>
+
+```bash
+# Remove a network
+podman network rm mynet
+
+# Force-remove a network (also removes associated containers)
+podman network rm --force mynet
+```
+
+## network prune
+
+Remove all networks not currently used by any container.
+
+```bash
+# Remove unused networks
+podman network prune
+
+# Skip the confirmation prompt
+podman network prune --force
+```
+
+## Common workflows
+
+```bash
+# Create an isolated backend network for a database
+podman network create --internal --subnet 10.10.0.0/24 db-net
+
+# Create a frontend network exposed to the host
+podman network create --subnet 172.20.0.0/16 frontend-net
+
+# Run a database on the internal network only
+podman run -d --name postgres \
+  --network db-net \
+  -e POSTGRES_PASSWORD=secret \
+  docker.io/library/postgres:15
+
+# Run an app server connected to both networks
+podman run -d --name app \
+  --network frontend-net \
+  -p 8080:8080 \
+  my-app-image
+podman network connect db-net app
+
+# Inspect which networks a container is connected to
+podman inspect --format '{{json .NetworkSettings.Networks}}' app
+
+# Clean up all unused networks
+podman network prune --force
+```

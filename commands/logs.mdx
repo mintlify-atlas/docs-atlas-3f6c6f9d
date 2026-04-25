@@ -1,0 +1,132 @@
+---
+title: "podman logs — Display logs from one or more containers"
+description: "Fetch and stream stdout/stderr output from containers. Supports following live output, filtering by time range, showing timestamps, and tailing lines."
+---
+
+`podman logs` retrieves the stdout and stderr output recorded by one or more containers. It works for both running and stopped containers. By default it prints all available log output and exits. Use `--follow` to stream logs in real time, similar to `tail -f`, and `--since` or `--until` to narrow the time range.
+
+## Synopsis
+
+```bash
+podman logs [options] CONTAINER [CONTAINER...]
+podman container logs [options] CONTAINER [CONTAINER...]
+```
+
+## Description
+
+`podman logs` batch-retrieves whatever log output is available at the time of execution. There is no guarantee that all output from a freshly started container will be available immediately; combine `podman logs` with a brief delay or use `--follow` to stream output as it arrives. Multiple container names or IDs can be passed in a single invocation; use `--names` to prefix each line with the container name when viewing logs from several containers simultaneously.
+
+<Note>
+When following logs for a container that is removed on exit (`podman run --rm`), there is a small chance that the log file is deleted before `podman logs` reads the final output.
+</Note>
+
+## Key flags
+
+<ParamField path="--follow, -f" type="boolean" default="false">
+  Follow log output as it is produced, streaming new lines to your terminal until you press `Ctrl-C` or the container stops. Equivalent to `tail -f` on the container's log stream.
+</ParamField>
+
+<ParamField path="--tail" type="integer" default="-1 (all lines)">
+  Output only the last N lines of the log. Pass a positive integer to limit output. The default `-1` prints all lines.
+</ParamField>
+
+<ParamField path="--since" type="string">
+  Show only log entries generated after the given timestamp or duration. Accepts:
+  - A duration string: `10m`, `1h30m`, `2h` (relative to the current time on the client)
+  - An RFC 3339 timestamp: `2024-03-01T14:00:00Z`
+  - A date-only string: `2024-03-01`
+</ParamField>
+
+<ParamField path="--until" type="string">
+  Show only log entries generated before the given timestamp or duration. Accepts the same formats as `--since`. Use together with `--since` to extract a time-bounded slice of logs.
+</ParamField>
+
+<ParamField path="--timestamps, -t" type="boolean" default="false">
+  Prefix each log line with its timestamp. Timestamps use the format recorded by the container's log driver.
+</ParamField>
+
+<ParamField path="--names, -n" type="boolean" default="false">
+  Prefix each log line with the container name. Useful when fetching logs from multiple containers simultaneously to distinguish which output came from which container.
+</ParamField>
+
+<ParamField path="--color" type="boolean" default="false">
+  Colorize output by container name when displaying logs from multiple containers. Makes it easier to visually distinguish output streams.
+</ParamField>
+
+## Examples
+
+### View all logs from a container
+
+```bash
+podman logs mycontainer
+```
+
+Or by container ID:
+
+```bash
+podman logs b3f2436bdb97
+```
+
+### Stream live log output
+
+```bash
+podman logs -f mycontainer
+```
+
+### Show only the last 50 lines
+
+```bash
+podman logs --tail 50 mycontainer
+```
+
+### Show logs with timestamps
+
+```bash
+podman logs -t mycontainer
+```
+
+### Show logs from the last 10 minutes
+
+```bash
+podman logs --since 10m mycontainer
+```
+
+### Show logs since a specific timestamp
+
+```bash
+podman logs --since 2024-03-01T14:00:00Z mycontainer
+```
+
+### Show logs up to 30 minutes ago
+
+```bash
+podman logs --until 30m mycontainer
+```
+
+### Extract logs from a specific time window
+
+```bash
+podman logs \
+  --since 2024-03-01T12:00:00Z \
+  --until 2024-03-01T13:00:00Z \
+  mycontainer
+```
+
+### View logs from multiple containers
+
+```bash
+podman logs --names container1 container2
+```
+
+### Follow logs for a freshly started container
+
+Start a container and immediately follow its output:
+
+```bash
+podman run -d --name myapp myimage
+podman logs -f myapp
+```
+
+<Tip>
+Combine `--follow` with `--since` to stream only new output while skipping historical log lines: `podman logs -f --since 0s mycontainer`.
+</Tip>

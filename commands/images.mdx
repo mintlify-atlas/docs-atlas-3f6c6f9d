@@ -1,0 +1,134 @@
+---
+title: 'podman images — list container images in local storage'
+description: 'List container images stored locally by Podman, with filtering, sorting, custom output formats, and support for showing dangling or intermediate layers.'
+---
+
+`podman images` displays the container images currently held in local Podman image storage. By default it shows repository name, tag, image ID, creation time, and disk size, filtering out dangling intermediate layer images. You can narrow results with `--filter`, reformat output with `--format`, and sort by various columns.
+
+## Synopsis
+
+```bash
+podman images [options] [image]
+podman image list [options] [image]
+podman image ls [options] [image]
+```
+
+## Description
+
+The optional `image` argument restricts output to images whose name matches the given string. Dangling images — those with no tag and not referenced by another image — are hidden by default; use `--all` or `--filter dangling=true` to include them. Output can be rendered as JSON, a plain table, or any Go template using the placeholders listed below.
+
+<Note>
+  All three command forms (`podman images`, `podman image list`, `podman image ls`) are equivalent.
+</Note>
+
+## Key flags
+
+<ParamField path="--all" type="boolean">
+  **Alias: `-a`**. Show all images including intermediate build layers that have no tag. Defaults to `false`.
+</ParamField>
+
+<ParamField path="--filter" type="string">
+  **Alias: `-f`**. Filter output by one or more conditions. Common expressions:
+  - `dangling=true` — only untagged images not referenced by another image.
+  - `label=key` or `label=key=value` — images with the specified label.
+  - `reference=name[:tag]` — images matching the name pattern.
+  - `before=image` / `since=image` — images created before or after the given image.
+  - `until=duration|timestamp` — images created before the given time.
+</ParamField>
+
+<ParamField path="--format" type="string">
+  Change the output format. Use `json` for machine-readable JSON or a Go template string. Available template placeholders include `.ID`, `.Repository`, `.Tag`, `.Size`, `.Created`, `.Digest`, `.Labels`, `.Containers`, `.IsDangling`, `.IsReadOnly`, and others.
+</ParamField>
+
+<ParamField path="--quiet" type="boolean">
+  **Alias: `-q`**. Print only image IDs, one per line. Useful for piping into other commands such as `podman rmi`.
+</ParamField>
+
+<ParamField path="--no-trunc" type="boolean">
+  Display full (untruncated) image IDs and digests instead of the short 12-character prefix.
+</ParamField>
+
+<ParamField path="--sort" type="string" default="created">
+  Sort the output by `created`, `id`, `repository`, `size`, or `tag`. When sorting by `repository`, Podman also sorts by `tag` as a tiebreaker to produce stable output.
+</ParamField>
+
+<ParamField path="--digests" type="boolean">
+  Add a `DIGEST` column to the default table output showing the content-addressable digest for each image.
+</ParamField>
+
+<ParamField path="--noheading" type="boolean">
+  Suppress the column header line. Useful when parsing output in shell scripts.
+</ParamField>
+
+## Examples
+
+List all non-dangling images:
+
+```bash
+podman images
+```
+
+```
+REPOSITORY                         TAG         IMAGE ID      CREATED       SIZE
+quay.io/podman/stable              latest      e0b7dabc3352  22 hours ago  331 MB
+docker.io/library/alpine           latest      9c6f07244728  5 days ago    5.83 MB
+registry.fedoraproject.org/fedora  latest      2ecb6df95994  3 weeks ago   169 MB
+```
+
+Show all images including intermediate layers:
+
+```bash
+podman images -a
+```
+
+List images matching a name pattern:
+
+```bash
+podman images alpine
+```
+
+List only image IDs (useful for scripting):
+
+```bash
+podman images --quiet
+```
+
+List dangling (untagged, unreferenced) images:
+
+```bash
+podman images --filter dangling=true
+```
+
+Output as JSON:
+
+```bash
+podman images --format json
+```
+
+Custom table with specific columns:
+
+```bash
+podman images --format "table {{.ID}} {{.Repository}} {{.Tag}}"
+```
+
+List images with full untruncated IDs:
+
+```bash
+podman image list --no-trunc
+```
+
+Sort by repository name:
+
+```bash
+podman images --sort repository
+```
+
+Remove all dangling images by piping quiet output to `rmi`:
+
+```bash
+podman images --filter dangling=true --quiet | xargs podman rmi
+```
+
+<Tip>
+  Combine `--filter` with `--quiet` to build targeted cleanup pipelines — for example, removing all images created before a specific date.
+</Tip>

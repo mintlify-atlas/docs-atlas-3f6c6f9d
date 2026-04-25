@@ -1,0 +1,261 @@
+---
+title: "Container lifecycle: run, exec, inspect, and remove"
+description: "Run, inspect, exec into, and remove containers in Podman. Covers port mapping, environment variables, volume mounts, logs, and lifecycle commands."
+---
+
+Containers are the core unit of work in Podman. Each container is an isolated process with its own filesystem, network stack, and process tree. This guide walks through the complete container lifecycle — from running your first container to cleaning up after you're done.
+
+## Running a container
+
+`podman run` is the primary command for starting containers. If the specified image is not present locally, Podman automatically pulls it before starting the container.
+
+<Steps>
+  <Step title="Run a container in detached mode">
+    Start an nginx web server in the background with a name, port mapping, and detached mode:
+
+    ```bash
+    podman run --name basic_httpd -d -p 8080:80/tcp docker.io/nginx
+    ```
+
+    Podman prints the full container ID after starting. The container runs in the background until explicitly stopped.
+  </Step>
+
+  <Step title="Verify it is running">
+    List running containers with `podman ps`:
+
+    ```bash
+    podman ps
+    ```
+
+    To see all containers, including stopped ones, add the `-a` flag:
+
+    ```bash
+    podman ps -a
+    ```
+  </Step>
+
+  <Step title="Test the running service">
+    Because port 8080 on the host is forwarded to port 80 in the container, you can reach the server directly:
+
+    ```bash
+    curl http://localhost:8080
+    ```
+  </Step>
+</Steps>
+
+## Common run options
+
+<AccordionGroup>
+  <Accordion title="Port mapping (-p)">
+    Map a host port to a container port using `-p host_port:container_port`:
+
+    ```bash
+    podman run -d -p 8080:80 docker.io/nginx
+    ```
+
+    Multiple ports can be mapped in a single command:
+
+    ```bash
+    podman run -d -p 8080:80 -p 8443:443 docker.io/nginx
+    ```
+  </Accordion>
+
+  <Accordion title="Environment variables (-e)">
+    Pass environment variables into a container with `-e KEY=VALUE`:
+
+    ```bash
+    podman run -d -e POSTGRES_PASSWORD=mysecret -e POSTGRES_USER=admin \
+      docker.io/postgres
+    ```
+
+    To load variables from a file, use `--env-file`:
+
+    ```bash
+    podman run -d --env-file ./my.env docker.io/postgres
+    ```
+  </Accordion>
+
+  <Accordion title="Volume mounts (-v)">
+    Mount a host directory into a container with `-v host_path:container_path`:
+
+    ```bash
+    podman run -d -v /home/user/data:/var/data:z docker.io/nginx
+    ```
+
+    <Note>
+      The `:z` suffix sets the SELinux label so the container can read and write the volume. Use `:Z` for private (unshared) volumes.
+    </Note>
+  </Accordion>
+
+  <Accordion title="Naming containers (--name)">
+    Assign a memorable name instead of using the auto-generated ID:
+
+    ```bash
+    podman run --name myapp -d docker.io/nginx
+    ```
+
+    Named containers can be referenced by name in other commands:
+
+    ```bash
+    podman stop myapp
+    podman rm myapp
+    ```
+  </Accordion>
+
+  <Accordion title="Interactive mode (-it)">
+    Attach an interactive terminal to run commands inside the container:
+
+    ```bash
+    podman run -it docker.io/fedora /bin/bash
+    ```
+
+    `-i` keeps stdin open; `-t` allocates a pseudo-TTY. Both are usually combined.
+  </Accordion>
+</AccordionGroup>
+
+## Managing container lifecycle
+
+<Tabs>
+  <Tab title="Start and stop">
+    Stop a running container gracefully (sends SIGTERM, then SIGKILL after a timeout):
+
+    ```bash
+    podman stop basic_httpd
+    ```
+
+    Start a stopped container again:
+
+    ```bash
+    podman start basic_httpd
+    ```
+
+    Restart a container (stop + start in one step):
+
+    ```bash
+    podman restart basic_httpd
+    ```
+  </Tab>
+
+  <Tab title="Remove">
+    Remove a stopped container:
+
+    ```bash
+    podman rm basic_httpd
+    ```
+
+    Force-remove a running container:
+
+    ```bash
+    podman rm -f basic_httpd
+    ```
+
+    Remove all stopped containers at once:
+
+    ```bash
+    podman container prune
+    ```
+  </Tab>
+</Tabs>
+
+## Executing commands in a running container
+
+Use `podman exec` to run a command inside an already-running container without stopping it:
+
+```bash
+podman exec basic_httpd cat /etc/nginx/nginx.conf
+```
+
+To open an interactive shell session inside the container:
+
+```bash
+podman exec -it basic_httpd /bin/bash
+```
+
+<Tip>
+  `podman exec` requires the container to already be running. Use `podman run -it` if you want an interactive shell from the start.
+</Tip>
+
+## Viewing logs
+
+Retrieve a container's standard output and standard error:
+
+```bash
+podman logs basic_httpd
+```
+
+Follow logs in real time (like `tail -f`):
+
+```bash
+podman logs -f basic_httpd
+```
+
+Show only the last 50 lines:
+
+```bash
+podman logs --tail 50 basic_httpd
+```
+
+## Inspecting a container
+
+`podman inspect` returns detailed JSON metadata for a container, including network settings, mounts, environment variables, and resource limits:
+
+```bash
+podman inspect basic_httpd
+```
+
+Extract a specific field using `--format` with a Go template:
+
+```bash
+podman inspect --format '{{.NetworkSettings.IPAddress}}' basic_httpd
+```
+
+To see running processes inside a container, use `podman top`:
+
+```bash
+podman top basic_httpd
+```
+
+## Complete example
+
+The following example runs a named PostgreSQL container with environment variables, a volume mount, and a mapped port:
+
+```bash
+podman run \
+  --name mydb \
+  -d \
+  -p 5432:5432 \
+  -e POSTGRES_USER=admin \
+  -e POSTGRES_PASSWORD=secret \
+  -e POSTGRES_DB=appdb \
+  -v /home/user/pgdata:/var/lib/postgresql/data:z \
+  docker.io/postgres:16
+```
+
+Verify it started:
+
+```bash
+podman ps
+```
+
+Open an interactive `psql` session inside the running container:
+
+```bash
+podman exec -it mydb psql -U admin -d appdb
+```
+
+View its logs:
+
+```bash
+podman logs mydb
+```
+
+Stop and remove it when done:
+
+```bash
+podman stop mydb
+podman rm mydb
+```
+
+<Warning>
+  `podman rm` is permanent. Data stored only inside the container filesystem (not in a mounted volume) is lost when the container is removed.
+</Warning>

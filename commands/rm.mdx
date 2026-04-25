@@ -1,0 +1,150 @@
+---
+title: "podman rm — Remove one or more stopped containers"
+description: "Delete containers by name or ID, with options to force-remove running containers, remove associated volumes, and recursively clean up dependent containers."
+---
+
+`podman rm` removes one or more containers from the host. Containers must be stopped before they can be removed unless you use `--force`. The command does not remove images; use `podman rmi` for that. Anonymous volumes associated with the container can be removed at the same time with `--volumes`.
+
+## Synopsis
+
+```bash
+podman rm [options] CONTAINER [CONTAINER...]
+podman container rm [options] CONTAINER [CONTAINER...]
+```
+
+## Description
+
+Running or paused containers are not removed without `--force`. When `--force` is used, Podman also stops running containers before removing them. The `--force` flag can additionally remove containers whose OCI runtime is no longer available (for example, orphaned containers left by other container engines like Buildah).
+
+<Warning>
+`podman rm -f -a` forcibly removes all containers, including running ones. This cannot be undone. Named volumes are not removed unless `--volumes` is also specified.
+</Warning>
+
+## Key flags
+
+<ParamField path="--all, -a" type="boolean" default="false">
+  Remove all containers, regardless of state. Combine with `--force` (`-f`) to also remove running and paused containers.
+</ParamField>
+
+<ParamField path="--force, -f" type="boolean" default="false">
+  Force removal of running and paused containers. Also removes containers from storage even if they are not recognized by the current Podman instance (e.g., created by Buildah). Sends SIGKILL to running containers before removing them.
+</ParamField>
+
+<ParamField path="--volumes, -v" type="boolean" default="false">
+  Remove anonymous (unnamed) volumes associated with the container. Does not affect named volumes created with `podman volume create` or specified by name using `podman run -v NAME:/path`.
+</ParamField>
+
+<ParamField path="--depend" type="boolean" default="false">
+  Remove the specified container and recursively remove all containers that depend on it (i.e., containers that share its network namespace or are linked to it).
+</ParamField>
+
+<ParamField path="--filter" type="string">
+  Remove containers matching a filter expression. Supported keys include `name`, `label`, `status`, `id`, `network`, `volume`, and `ancestor`. Can be specified multiple times.
+</ParamField>
+
+<ParamField path="--time, -t" type="integer" default="10">
+  Seconds to wait for a running container to stop before sending SIGKILL when `--force` is used. Set to `0` to kill immediately. Requires `--force`.
+</ParamField>
+
+<ParamField path="--ignore" type="boolean" default="false">
+  Do not report an error for containers that do not exist. Useful in scripts that may run on partially cleaned-up environments.
+</ParamField>
+
+<ParamField path="--cidfile" type="string">
+  Read the container ID from a file. Can be specified multiple times. If `--ignore` is also set, missing cidfiles are silently skipped.
+</ParamField>
+
+## Examples
+
+### Remove a stopped container by name
+
+```bash
+podman rm mywebserver
+```
+
+### Remove multiple containers
+
+```bash
+podman rm mywebserver myflaskserver 860a4b23
+```
+
+### Force-remove a running container
+
+```bash
+podman rm -f 860a4b23
+```
+
+### Remove a container and its dependent containers
+
+```bash
+podman rm --depend mywebserver
+```
+
+### Remove a container and its anonymous volumes
+
+```bash
+podman rm --volumes mycontainer
+```
+
+### Remove all containers (force-stop running ones first)
+
+```bash
+podman rm -f -a
+```
+
+### Remove with a grace period before SIGKILL
+
+```bash
+podman rm --time 2 --force 860a4b23
+```
+
+### Remove instantly without grace period
+
+```bash
+podman rm --time 0 --force 860a4b23
+```
+
+### Remove by label
+
+```bash
+podman rm --filter label=app=frontend
+```
+
+### Remove all exited containers
+
+```bash
+podman rm --filter status=exited
+```
+
+### Remove by ancestor image
+
+```bash
+podman rm --filter ancestor=nginx
+```
+
+### Remove by network
+
+```bash
+podman rm --filter network=web-net
+```
+
+### Remove containers from a cidfile
+
+```bash
+podman rm --cidfile ./cidfile-1 --cidfile /home/user/cidfile-2
+```
+
+### Skip missing containers silently
+
+```bash
+podman rm --ignore mycontainer1 mycontainer2 nonexistent-container
+```
+
+## Exit status
+
+| Code | Meaning |
+|------|---------|
+| `0` | All specified containers removed successfully |
+| `1` | One or more containers did not exist, but no other failures |
+| `2` | One or more containers is paused or running (and `--force` was not used) |
+| `125` | Any other error |

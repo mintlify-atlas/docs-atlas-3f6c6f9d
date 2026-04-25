@@ -1,24 +1,11 @@
 {
-  "$schema": "https://mintlify.com/docs.json",
-  "name": "Podman",
+  "projectType": "cli-tool",
+  "projectName": "Podman",
+  "projectDescription": "Podman is a daemonless, rootless-capable container engine for managing OCI containers, pods, images, and volumes with a Docker-compatible CLI.",
   "theme": "aspen",
-  "colors": {
-    "primary": "#804290",
-    "light": "#2d374d",
-    "dark": "#cccdd0"
-  },
-  "favicon": "https://media.brand.dev/2ae309cf-1597-4441-9291-d2f031ba8043.webp",
-  "navbar": {
-    "primary": {
-      "type": "github",
-      "href": "https://github.com/containers/podman"
-    }
-  },
-  "footer": {
-    "socials": {
-      "github": "https://github.com/containers/podman"
-    }
-  },
+  "primaryColor": "#804290",
+  "lightColor": "#2d374d",
+  "darkColor": "#cccdd0",
   "navigation": {
     "tabs": [
       {
@@ -109,5 +96,40 @@
         ]
       }
     ]
-  }
+  },
+  "keyFeatures": [
+    "Daemonless architecture — no background service required",
+    "Rootless containers — run containers without root privileges",
+    "Docker-compatible CLI — drop-in alias for Docker commands",
+    "Native pod management — group containers sharing resources",
+    "Quadlet/systemd integration — declarative container management via unit files",
+    "REST API — Docker-compatible and Podman-native HTTP APIs",
+    "Cross-platform — runs on Linux natively, macOS and Windows via virtual machine",
+    "OCI-compliant — supports OCI and Docker image formats",
+    "Kubernetes integration — generate and play Kubernetes YAML",
+    "Multi-arch builds via podman farm — build images for multiple architectures"
+  ],
+  "publicApiSurface": [
+    "podman run",
+    "podman exec",
+    "podman ps",
+    "podman stop",
+    "podman rm",
+    "podman pull",
+    "podman push",
+    "podman build",
+    "podman images",
+    "podman rmi",
+    "podman pod create/start/stop/rm",
+    "podman volume create/ls/rm",
+    "podman network create/ls/rm",
+    "podman secret create/ls/rm",
+    "podman system service",
+    "podman machine init/start/stop",
+    "podman kube play/generate",
+    "podman quadlet",
+    "podman manifest create/push",
+    "podman compose",
+    "pkg/bindings — Go client library for the Podman REST API"
+  ]
 }

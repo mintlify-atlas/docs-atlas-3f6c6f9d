@@ -1,0 +1,118 @@
+---
+title: 'podman pull — download container images from a registry'
+description: 'Pull a container image from a remote registry or other transport source into local Podman image storage, with support for multi-arch and digest pinning.'
+---
+
+`podman pull` copies an image from a remote source into local image storage. The source can be a container registry, a local directory, a tarball, or a running Docker daemon — Podman supports the full range of [containers-transports](https://github.com/containers/image/blob/main/docs/containers-transports.5.md). When you omit a registry prefix, Podman treats the name as a *short name* and either resolves it against a configured alias file or prompts you to choose a registry interactively.
+
+## Synopsis
+
+```bash
+podman pull [options] source [source...]
+podman image pull [options] [transport]name[:tag|@digest]
+```
+
+## Description
+
+After a successful pull, Podman prints the full image ID to stdout. You can pin to an exact content-addressable digest (`image@sha256:...`) rather than a mutable tag to guarantee reproducibility. When the `--all-tags` flag is used, every tag published under the repository name is fetched in one operation.
+
+<Note>
+  Images are stored in local image storage, not in a daemon. Use `podman images` to list what has been pulled.
+</Note>
+
+<Warning>
+  Using short names (e.g., `alpine` instead of `docker.io/library/alpine`) introduces registry ambiguity. Always use fully-qualified image references in production scripts.
+</Warning>
+
+## Key flags
+
+<ParamField path="--arch" type="string">
+  Override the CPU architecture of the image to pull. Defaults to the host architecture. Example values: `arm`, `arm64`, `amd64`, `s390x`. Once pulled with this flag, subsequent local lookups match the specified architecture regardless of the host.
+</ParamField>
+
+<ParamField path="--os" type="string">
+  Override the operating system of the image to pull. Defaults to the host OS. Example: `--os=windows`. Subsequent local lookups match this OS.
+</ParamField>
+
+<ParamField path="--all-tags" type="boolean">
+  Pull every tag available in the repository. When using this flag with an unqualified image name, Podman always uses `docker.io` rather than iterating over configured search registries.
+</ParamField>
+
+<ParamField path="--authfile" type="string">
+  Path to a JSON authentication file created by `podman login`. Defaults to `${XDG_RUNTIME_DIR}/containers/auth.json` on Linux. You can also set the `REGISTRY_AUTH_FILE` environment variable.
+</ParamField>
+
+<ParamField path="--tls-verify" type="boolean" default="true">
+  Require HTTPS and verify TLS certificates when contacting the registry. Set to `false` to allow insecure registries. Registries listed as insecure in `containers-registries.conf` skip verification automatically.
+</ParamField>
+
+<ParamField path="--policy" type="string" default="always">
+  Control when an image is pulled:
+  - `always` — always pull, error if pull fails.
+  - `missing` — pull only if not present locally.
+  - `never` — never pull; error if not present locally.
+  - `newer` — pull only if the registry digest differs from the local copy.
+</ParamField>
+
+<ParamField path="--quiet" type="boolean">
+  Suppress progress output. Only the final image ID is printed.
+</ParamField>
+
+<ParamField path="--retry" type="integer">
+  Number of times to retry a failed pull before giving up.
+</ParamField>
+
+## Examples
+
+Pull the latest Alpine image using short-name resolution:
+
+```bash
+podman pull alpine:latest
+```
+
+Pull an image from a specific registry with a fully-qualified name:
+
+```bash
+podman pull docker.io/library/alpine:latest
+podman pull quay.io/libpod/cirros:latest
+```
+
+Pin to an exact digest for reproducible builds:
+
+```bash
+podman pull alpine@sha256:d7342993700f8cd7aba8496c2d0e57be0666e80b4c441925fc6f9361fa81d10e
+```
+
+Pull an ARM image on an AMD64 host (requires emulation for `RUN`):
+
+```bash
+podman pull --arch=arm64 docker.io/library/debian:bookworm
+```
+
+Pull using credentials from a custom auth file:
+
+```bash
+podman pull --authfile ~/.config/myauths.json quay.io/myorg/myimage:latest
+```
+
+Pull without TLS verification (for private insecure registries):
+
+```bash
+podman pull --tls-verify=false registry.internal.example.com/myapp:dev
+```
+
+Pull only if the image is not already present locally:
+
+```bash
+podman pull --policy missing alpine:latest
+```
+
+Pull all tags in a repository quietly with retries:
+
+```bash
+podman pull --all-tags --quiet --retry 3 docker.io/library/node
+```
+
+<Tip>
+  Set `TMPDIR` to change where Podman stores temporary layer data during a pull. The default is `/var/tmp`.
+</Tip>

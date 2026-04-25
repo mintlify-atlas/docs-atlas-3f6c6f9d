@@ -1,0 +1,119 @@
+---
+title: 'podman push — upload container images to a registry'
+description: 'Push a locally stored image, manifest list, or image index to a remote registry or other transport destination, with optional signing and encryption.'
+---
+
+`podman push` transfers an image from local Podman storage to a destination you specify. The destination can be a container registry, a local directory, a tarball archive, or a running Docker daemon. Podman supports all transports defined by [containers-transports](https://github.com/containers/image/blob/main/docs/containers-transports.5.md). When no transport prefix is given, the `docker` transport (container registry) is assumed.
+
+## Synopsis
+
+```bash
+podman push [options] image [destination]
+podman image push [options] image [destination]
+```
+
+## Description
+
+You can push the same local image to a different name or registry by supplying an explicit `destination` argument alongside the local image name or ID. Podman can also sign the pushed image using GPG ("simple signing") or a sigstore key, and can encrypt individual layers with JWE, PGP, or PKCS7 keys.
+
+<Note>
+  To delete an image from a remote registry, use `skopeo delete`. Most registries do not support deletion via `podman push`.
+</Note>
+
+<Warning>
+  `--sign-by` and `--sign-by-sigstore-private-key` are not available with the remote Podman client (Mac and Windows outside WSL2).
+</Warning>
+
+## Key flags
+
+<ParamField path="--authfile" type="string">
+  Path to a JSON authentication file produced by `podman login`. Defaults to `${XDG_RUNTIME_DIR}/containers/auth.json` on Linux. Override with the `REGISTRY_AUTH_FILE` environment variable.
+</ParamField>
+
+<ParamField path="--tls-verify" type="boolean" default="true">
+  Require HTTPS and verify TLS certificates when contacting the registry. Set to `false` for insecure private registries. Registries listed as insecure in `containers-registries.conf` skip TLS verification automatically.
+</ParamField>
+
+<ParamField path="--sign-by" type="string">
+  Sign the pushed image using GPG "simple signing" with the specified key fingerprint or email address. Not available with the remote client.
+</ParamField>
+
+<ParamField path="--remove-signatures" type="boolean">
+  Strip any existing signatures from the image before pushing. Useful when re-publishing an image to a different registry where the original signatures are no longer valid.
+</ParamField>
+
+<ParamField path="--format" type="string">
+  Manifest format to use when pushing: `oci`, `v2s2` (Docker Schema 2), or `v2s1` (Docker Schema 1). Defaults to the format already stored in the image.
+</ParamField>
+
+<ParamField path="--digestfile" type="string">
+  After a successful push, write the image digest (`sha256:...`) to the specified file. Useful for recording the exact pushed digest in CI pipelines.
+</ParamField>
+
+<ParamField path="--encryption-key" type="string">
+  Encrypt image layers using the specified key. Format: `protocol:keyfile`, where protocol is one of `jwe`, `pgp`, or `pkcs7`. Example: `jwe:/path/to/key.pem`.
+</ParamField>
+
+<ParamField path="--quiet" type="boolean">
+  Suppress progress output during the push.
+</ParamField>
+
+## Examples
+
+Push an image to a container registry:
+
+```bash
+podman push myimage quay.io/myorg/myimage:latest
+```
+
+Push to a registry using credentials from a custom auth file:
+
+```bash
+podman push --authfile ~/.config/myauths.json alpine docker://docker.io/myuser/alpine
+```
+
+Push without TLS verification (for insecure internal registries):
+
+```bash
+podman push --tls-verify=false myimage registry.internal.example.com/myapp:dev
+```
+
+Push and save the resulting digest to a file:
+
+```bash
+podman push --digestfile /tmp/pushed-digest.txt myimage quay.io/myorg/myimage:v1.0
+```
+
+Push and sign the image with a GPG key:
+
+```bash
+podman push --sign-by user@example.com myimage quay.io/myorg/myimage:signed
+```
+
+Push while stripping any pre-existing signatures:
+
+```bash
+podman push --remove-signatures myimage quay.io/myorg/myimage:unsigned
+```
+
+Push as OCI format to a local directory:
+
+```bash
+podman push --format oci myimage dir:/tmp/myimage-oci
+```
+
+Push to a tarball in docker-archive format:
+
+```bash
+podman push myimage docker-archive:/tmp/myimage.tar
+```
+
+Push directly into the local Docker daemon:
+
+```bash
+sudo podman push myimage docker-daemon:docker.io/library/myimage:latest
+```
+
+<Tip>
+  Use `podman login` before pushing to authenticate against a registry. Credentials are stored in the auth file referenced by `--authfile`.
+</Tip>

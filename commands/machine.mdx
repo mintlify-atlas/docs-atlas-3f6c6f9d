@@ -1,0 +1,240 @@
+---
+title: "podman machine — Manage Podman Linux virtual machines"
+description: "Reference for podman machine subcommands. Initialize, start, stop, and SSH into the Linux VMs that Podman needs to run containers on macOS and Windows."
+---
+
+Containers are a Linux technology — their core functionality depends on Linux kernel features such as namespaces and cgroups. On macOS and Windows, Podman therefore requires a lightweight Linux virtual machine. The `podman machine` commands manage the full lifecycle of these VMs: provisioning, starting, stopping, inspection, and removal. On Linux, `podman machine` is optional but can be used to run containers in an isolated VM.
+
+All `podman machine` commands are rootless only.
+
+<Note>
+The machine configuration files are stored under `$XDG_CONFIG_HOME/containers/podman/machine/`. Changing `$XDG_CONFIG_HOME` while machines are running may cause unexpected behavior.
+</Note>
+
+## Supported providers
+
+| Platform | Default provider | Alternative |
+|---|---|---|
+| Linux | `qemu` | — |
+| macOS | `libkrun` | `applehv` |
+| Windows | `wsl` | `hyperv` |
+
+## Subcommands
+
+| Subcommand | Description |
+|---|---|
+| `cp` | Securely copy files between the host and the VM. |
+| `info` | Display machine host info. |
+| `init` | Initialize (provision) a new VM. |
+| `inspect` | Show detailed configuration of one or more VMs. |
+| `list` | List all VMs. |
+| `os` | Manage the VM's OS image. |
+| `reset` | Reset all Podman machines and related environment. |
+| `rm` | Remove a VM. |
+| `set` | Modify settings on an existing VM. |
+| `ssh` | Open an SSH session into a VM. |
+| `start` | Start a VM. |
+| `stop` | Stop a VM. |
+
+## machine init
+
+Provisions a new VM. The VM image is downloaded automatically on first use. If no name is given, the machine is named `podman-machine-default`.
+
+### Key flags
+
+<AccordionGroup>
+  <Accordion title="--cpus">
+    Number of CPUs to allocate to the VM.
+
+    ```bash
+    podman machine init --cpus 4 mymachine
+    ```
+  </Accordion>
+
+  <Accordion title="--memory / -m">
+    Amount of memory in MiB to allocate.
+
+    ```bash
+    podman machine init --memory 4096 mymachine
+    ```
+  </Accordion>
+
+  <Accordion title="--disk-size">
+    Size of the VM's disk image in GiB.
+
+    ```bash
+    podman machine init --disk-size 50 mymachine
+    ```
+  </Accordion>
+
+  <Accordion title="--image">
+    Use a specific image URL or OCI reference for the VM instead of the default Fedora CoreOS image.
+
+    ```bash
+    podman machine init --image docker://quay.io/podman/machine-os:5.0 mymachine
+    ```
+  </Accordion>
+
+  <Accordion title="--rootful">
+    Configure the machine to run Podman as root inside the VM. Required for some features such as macvlan networking.
+
+    ```bash
+    podman machine init --rootful mymachine
+    ```
+  </Accordion>
+
+  <Accordion title="--now">
+    Start the machine immediately after initialization.
+
+    ```bash
+    podman machine init --now
+    ```
+  </Accordion>
+
+  <Accordion title="--volume / -v">
+    Mount a host directory into the VM. Accepts the same `host:vm` syntax as container volume mounts.
+
+    ```bash
+    podman machine init -v /Users/alice/projects:/projects mymachine
+    ```
+  </Accordion>
+</AccordionGroup>
+
+### Examples
+
+```bash
+# Initialize the default machine with defaults
+podman machine init
+
+# Initialize with more resources and start immediately
+podman machine init --cpus 4 --memory 4096 --disk-size 60 --now mymachine
+
+# Initialize a rootful machine
+podman machine init --rootful mymachine
+
+# Initialize and mount a host directory into the VM
+podman machine init -v /Users/alice/work:/work mymachine
+```
+
+## machine start
+
+Starts an existing VM. If only one machine exists, it is started by default.
+
+```bash
+# Start the default machine
+podman machine start
+
+# Start a named machine
+podman machine start mymachine
+```
+
+## machine stop
+
+Gracefully shuts down a running VM.
+
+```bash
+# Stop the default machine
+podman machine stop
+
+# Stop a named machine
+podman machine stop mymachine
+```
+
+## machine list
+
+Lists all VMs along with their status, provider, and configuration.
+
+```bash
+# List all machines
+podman machine list
+
+# Quiet output (names only)
+podman machine list -q
+
+# JSON output
+podman machine list --format json
+```
+
+## machine inspect
+
+Returns detailed JSON configuration for one or more VMs, including the socket path, resource allocation, and provider details.
+
+```bash
+# Inspect the default machine
+podman machine inspect
+
+# Inspect a named machine
+podman machine inspect mymachine
+
+# Extract the socket path
+podman machine inspect --format '{{.ConnectionInfo.PodmanSocket.Path}}' mymachine
+```
+
+## machine ssh
+
+Opens an SSH session into the VM, or runs a single command inside it.
+
+```bash
+# Open an interactive SSH shell in the default machine
+podman machine ssh
+
+# Open a shell in a named machine
+podman machine ssh mymachine
+
+# Run a single command inside the VM
+podman machine ssh mymachine sudo dnf update -y
+
+# Run a command as root inside the VM
+podman machine ssh --username root mymachine systemctl status podman.socket
+```
+
+## machine rm
+
+Removes a VM and all its associated data.
+
+<Warning>
+`podman machine rm` deletes the VM disk image and all data stored inside it. Volumes mounted from the host are not affected, but any state inside the VM is permanently lost.
+</Warning>
+
+```bash
+# Remove the default machine
+podman machine rm
+
+# Remove a named machine (with confirmation prompt)
+podman machine rm mymachine
+
+# Force removal without prompting
+podman machine rm --force mymachine
+
+# Stop the machine first, then remove it
+podman machine stop mymachine && podman machine rm mymachine
+```
+
+## Common workflows
+
+```bash
+# First-time setup on macOS or Windows
+podman machine init --cpus 4 --memory 4096 --disk-size 60
+podman machine start
+podman run --rm docker.io/library/hello-world
+
+# Check machine status and resource usage
+podman machine list
+podman machine inspect
+
+# SSH into the VM to troubleshoot
+podman machine ssh
+journalctl -u podman.socket
+
+# Update the default machine's CPU/memory allocation
+podman machine stop
+podman machine set --cpus 8 --memory 8192
+podman machine start
+
+# Copy a file from the host into the VM
+podman machine cp ./config.toml mymachine:/etc/myapp/config.toml
+
+# Completely reset and start fresh
+podman machine rm --force
+podman machine init --now
+```

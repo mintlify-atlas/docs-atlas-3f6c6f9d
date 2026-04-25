@@ -1,0 +1,175 @@
+---
+title: "Connecting to a Remote Podman Service via SSH Tunnel"
+description: "Connect a local Podman CLI to a remote Linux server over SSH, set up the system service and socket, manage connections, and use the --remote flag."
+---
+
+Podman's remote client lets you run `podman` commands on one machine while the actual container workloads execute on a separate Linux server. From the client's perspective, the experience is nearly identical to running containers locally — the same CLI, the same output — but all execution happens on the remote host via a REST API over SSH.
+
+## Architecture overview
+
+The remote client uses a client-server model. You need Podman installed on a Linux machine or VM that also has the SSH daemon running. When you execute a Podman command on the client, Podman connects to the server via SSH and then connects to the Podman service using systemd socket activation, hitting the Podman REST API. The commands are executed on the server.
+
+<CardGroup cols={2}>
+  <Card title="Client machine" icon="laptop">
+    Runs `podman --remote` or the `podman-remote` binary. Can be Linux, macOS, or Windows. Issues commands but runs no containers itself.
+  </Card>
+  <Card title="Server machine" icon="server">
+    Runs a Linux OS with Podman installed and the `podman.socket` systemd unit active. Executes all container workloads.
+  </Card>
+</CardGroup>
+
+<Note>
+  The compiled `podman-remote` binary can only act as a remote client. The standard `podman` binary supports both local operation and remote operation via `podman --remote`. If you already have Podman installed, you do not need to install `podman-remote` separately.
+</Note>
+
+## Setting up the server
+
+<Steps>
+  <Step title="Enable the Podman socket">
+    On the Linux server, enable and start the Podman systemd socket. For a rootless (non-privileged) user, the socket listens at `/run/user/${UID}/podman/podman.sock`:
+
+    ```bash
+    systemctl --user enable --now podman.socket
+    ```
+
+    For root, use the system unit instead (without `--user`).
+
+    Verify the socket is active:
+
+    ```bash
+    podman --remote info
+    ```
+
+    ```text
+    host:
+      arch: amd64
+      buildahVersion: 1.16.0-dev
+      cgroupVersion: v2
+      conmon:
+        package: conmon-2.0.19-1.fc32.x86_64
+    ```
+  </Step>
+
+  <Step title="Enable linger for rootless users">
+    For rootless sockets to remain active when the user is not logged in, enable systemd linger:
+
+    ```bash
+    sudo loginctl enable-linger $USER
+    ```
+
+    This step is only required for rootless (non-root) users.
+  </Step>
+
+  <Step title="Enable and start SSH">
+    The Podman client communicates with the server over SSH. If `sshd` is not already running on the server, enable it:
+
+    ```bash
+    sudo systemctl enable --now sshd
+    ```
+  </Step>
+
+  <Step title="Set up SSH key authentication">
+    Remote Podman works best with SSH key authentication. Generate an ed25519 key pair on the client machine:
+
+    ```bash
+    ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519
+    ```
+
+    <Warning>
+      Using an RSA key can cause connection issues in some configurations. Use `ed25519` keys for remote Podman connections.
+    </Warning>
+
+    Copy the public key to the server's `authorized_keys`:
+
+    ```bash
+    ssh-copy-id -i ~/.ssh/id_ed25519.pub 192.168.122.1
+    ```
+
+    If you do not set up SSH keys, Podman will prompt for a password with each command.
+  </Step>
+</Steps>
+
+## Configuring connections on the client
+
+Use `podman system connection add` to register a named connection to the server. The first connection added becomes the default.
+
+```bash
+podman system connection add myuser \
+  --identity ~/.ssh/id_ed25519 \
+  ssh://myuser@192.168.122.1/run/user/1000/podman/podman.sock
+```
+
+List all configured connections:
+
+```bash
+podman system connection list
+```
+
+```text
+Name      Identity       URI
+myuser*   id_ed25519     ssh://myuser@192.168.122.1/run/user/1000/podman/podman.sock
+```
+
+The `*` marks the default connection. Switch to a different connection for a single command with `--connection`:
+
+```bash
+podman --connection myuser images
+```
+
+Remove a connection:
+
+```bash
+podman system connection remove myuser
+```
+
+## Using the remote flag
+
+Any standard `podman` binary can operate remotely by passing the `--remote` flag:
+
+```bash
+podman --remote run -it docker.io/library/alpine sh
+```
+
+You can also set the `CONTAINER_HOST` environment variable to point to the server socket, avoiding the need to pass `--remote` and a connection name on every command:
+
+```bash
+export CONTAINER_HOST=ssh://myuser@192.168.122.1/run/user/1000/podman/podman.sock
+export CONTAINER_SSHKEY=~/.ssh/id_ed25519
+podman info
+```
+
+## macOS and Windows clients
+
+On macOS and Windows, the Podman CLI connects to a Linux backend. The recommended approach for most users is `podman machine`, which manages a local Linux VM automatically:
+
+<Tabs>
+  <Tab title="podman machine (recommended)">
+    Initialize and start a Podman-managed Linux VM:
+
+    ```bash
+    podman machine init
+    podman machine start
+    ```
+
+    After this, all `podman` commands on the host automatically target the VM. No additional SSH setup is needed.
+  </Tab>
+  <Tab title="External Linux server">
+    If you want to connect to your own Linux machine or VM, follow the same steps as the Linux remote client setup above. On Windows, use Windows Command Prompt or PowerShell:
+
+    ```text
+    C:\Users\baude> podman system connection add baude ^
+      --identity c:\Users\baude\.ssh\id_rsa ^
+      ssh://192.168.122.1/run/user/1000/podman/podman.sock
+
+    C:\Users\baude> podman system connection list
+    Name    Identity    URI
+    baude*  id_rsa      ssh://baude@192.168.122.1/run/user/1000/podman/podman.sock
+    ```
+
+    On macOS, the same `podman system connection add` command works from Terminal.
+  </Tab>
+</Tabs>
+
+<Tip>
+  A few Podman flags do not apply to the remote client and are silently removed, such as `--latest` for container commands. The rest of the Podman CLI behaves identically whether you are local or remote.
+</Tip>

@@ -1,0 +1,226 @@
+---
+title: "Persist container data with Podman volumes and mounts"
+description: "Use named volumes, bind mounts, and tmpfs to persist and share data in Podman. Create, inspect, export, import, and prune volumes for containers."
+---
+
+Containers have an ephemeral filesystem by default — any data written inside a container is lost when that container is removed. Podman gives you three ways to persist or share data: **named volumes** (managed by Podman), **bind mounts** (a host directory mapped into the container), and **tmpfs** (an in-memory filesystem). Named volumes are the recommended approach for most workloads because Podman handles their lifecycle independently from any individual container.
+
+## Storage types at a glance
+
+<CardGroup cols={3}>
+  <Card title="Named volumes" icon="database">
+    Podman manages the storage location on disk. Volumes outlive containers, can be shared between containers, and are easy to back up with `podman volume export`.
+  </Card>
+  <Card title="Bind mounts" icon="folder-open">
+    A specific path on the host filesystem is mounted into the container. Useful for development workflows where you want to edit files on the host and see changes immediately inside the container.
+  </Card>
+  <Card title="tmpfs" icon="bolt">
+    An in-memory filesystem that exists only for the lifetime of the container. Suitable for sensitive data you do not want written to disk, such as secrets or scratch space.
+  </Card>
+</CardGroup>
+
+## Creating a named volume
+
+Use `podman volume create` to create a named volume. If you do not provide a name, Podman generates a random one.
+
+<Steps>
+  <Step title="Create a volume with an auto-generated name">
+    ```bash
+    podman volume create
+    ```
+  </Step>
+  <Step title="Create a named volume">
+    ```bash
+    podman volume create myvol
+    ```
+  </Step>
+  <Step title="Create a volume with a label">
+    ```bash
+    podman volume create --label env=production myvol
+    ```
+    Labels appear in `podman volume inspect` and `podman volume ls` output and help you filter volumes later.
+  </Step>
+</Steps>
+
+## Running a container with a volume
+
+Pass `-v NAME:PATH` to mount a named volume into a container at the specified path. If the volume does not exist, Podman creates it automatically.
+
+```bash
+podman run -d --name myapp -v myvol:/data myimage
+```
+
+The container writes to `/data`, and the data persists in `myvol` after the container exits or is removed.
+
+<Tabs>
+  <Tab title="Named volume">
+    ```bash
+    # Mount named volume at /data
+    podman run -d --name db -v pgdata:/var/lib/postgresql/data postgres:16
+    ```
+  </Tab>
+  <Tab title="Bind mount">
+    ```bash
+    # Mount host directory /home/user/app at /app inside the container
+    podman run -d --name dev -v /home/user/app:/app:z myimage
+    ```
+    The `:z` option applies the correct SELinux label to allow container access.
+  </Tab>
+  <Tab title="tmpfs">
+    ```bash
+    # Mount an in-memory tmpfs at /tmp/scratch
+    podman run -d --name secure --mount type=tmpfs,target=/tmp/scratch myimage
+    ```
+  </Tab>
+</Tabs>
+
+<Note>
+When using bind mounts on SELinux-enabled systems, append `:z` (shared) or `:Z` (private) to the volume flag to relabel the host content for container access.
+</Note>
+
+## Volume drivers
+
+The default driver is `local`, which stores data in a directory on the host filesystem. Podman also supports an `image` driver that uses a container image as the backing store with an overlay layer for changes.
+
+<AccordionGroup>
+  <Accordion title="local driver (default)">
+    The `local` driver stores volume data under the Podman storage path (typically `/var/lib/containers/storage/volumes/` for root, or `~/.local/share/containers/storage/volumes/` for rootless users).
+
+    You can extend the `local` driver to mount any filesystem using the `--opt` flag, passing `type`, `device`, and `o` options directly to `mount(8)`.
+
+    Create a tmpfs-backed named volume with a size limit:
+
+    ```bash
+    podman volume create --opt device=tmpfs --opt type=tmpfs --opt o=size=2M,nodev,noexec myvol
+    ```
+
+    Create a volume with specific UID/GID ownership:
+
+    ```bash
+    podman volume create --opt device=tmpfs --opt type=tmpfs --opt o=uid=1000,gid=1000 testvol
+    ```
+  </Accordion>
+  <Accordion title="image driver">
+    The `image` driver uses a container image as the volume's read layer. Changes are written to an overlay layer on top. Specify the image with `--opt image=`.
+
+    ```bash
+    podman volume create --driver image --opt image=fedora:latest fedoraVol
+    ```
+
+    <Warning>
+    The `image` option is mandatory when using the `image` driver. Omitting it causes an error.
+    </Warning>
+  </Accordion>
+</AccordionGroup>
+
+## Listing volumes
+
+```bash
+podman volume ls
+```
+
+Filter by label:
+
+```bash
+podman volume ls --filter label=env=production
+```
+
+## Inspecting a volume
+
+```bash
+podman volume inspect myvol
+```
+
+This returns a JSON object with the volume's name, driver, mount point, creation time, labels, and options. Use this to find the exact host path where volume data is stored.
+
+## Removing volumes
+
+Remove a specific volume:
+
+```bash
+podman volume rm myvol
+```
+
+<Warning>
+You cannot remove a volume that is in use by a running or stopped container. Stop and remove the container first, or use `podman rm -v CONTAINER` to remove the container and its associated anonymous volumes in one step.
+</Warning>
+
+Remove multiple volumes at once:
+
+```bash
+podman volume rm vol1 vol2 vol3
+```
+
+## Pruning unused volumes
+
+Remove all volumes that are not currently mounted by any container:
+
+```bash
+podman volume prune
+```
+
+Podman prompts for confirmation before deleting. To skip the prompt in scripts:
+
+```bash
+podman volume prune --force
+```
+
+Filter volumes to prune by label:
+
+```bash
+podman volume prune --filter label=env=staging
+```
+
+## Exporting and importing volumes
+
+Use `podman volume export` to create a portable tar archive of a volume's contents, and `podman volume import` to restore it into an existing volume.
+
+<Steps>
+  <Step title="Export a volume to a tar file">
+    ```bash
+    podman volume export myvol --output myvol-backup.tar
+    ```
+  </Step>
+  <Step title="Create a new volume to restore into">
+    ```bash
+    podman volume create myvol-restore
+    ```
+  </Step>
+  <Step title="Import the archive into the new volume">
+    ```bash
+    podman volume import myvol-restore myvol-backup.tar
+    ```
+  </Step>
+  <Step title="Verify the restored contents">
+    ```bash
+    podman run --rm -v myvol-restore:/data alpine ls /data
+    ```
+  </Step>
+</Steps>
+
+<Tip>
+Export and import are the simplest way to migrate volume data between hosts or create point-in-time backups without knowing the volume's host path.
+</Tip>
+
+## Volume ownership and rootless users
+
+When a rootless container writes to a named volume, file ownership is determined by the user namespace mapping. If you need the volume owned by a specific UID or GID, set it at creation time:
+
+```bash
+podman volume create --uid 1000 --gid 1000 myvol
+```
+
+This sets the ownership of the volume's mount point directory without affecting how the filesystem is mounted.
+
+## Quick reference
+
+| Task | Command |
+|------|---------|
+| Create a named volume | `podman volume create myvol` |
+| Mount a volume in a container | `podman run -v myvol:/data IMAGE` |
+| List all volumes | `podman volume ls` |
+| Inspect a volume | `podman volume inspect myvol` |
+| Remove a volume | `podman volume rm myvol` |
+| Remove unused volumes | `podman volume prune` |
+| Export a volume | `podman volume export myvol --output backup.tar` |
+| Import into a volume | `podman volume import myvol backup.tar` |

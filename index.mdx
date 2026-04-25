@@ -1,133 +1,83 @@
 ---
-title: "Introduction"
-description: "Welcome to the new home for your documentation"
-icon: 'star'
+title: "Podman: daemonless, rootless OCI container engine docs"
+description: "Podman is a daemonless OCI container engine with a Docker-compatible CLI. Run rootless containers, manage pods, and integrate with systemd via Quadlet."
 ---
 
-## Setting up
+Podman is a fully featured container engine that runs without a background daemon — giving you improved security, lower resource usage at idle, and a Docker-compatible CLI you can adopt immediately. Run containers as a non-root user, manage groups of containers as pods, and integrate with systemd natively through Quadlet.
 
-Get your documentation site up and running in minutes.
-
-<Card
-  title="Start here"
-  icon="rocket"
-  href="/quickstart"
-  horizontal
->
-  Follow our three step quickstart guide.
-</Card>
-
-## Make it yours
-
-Design a docs site that looks great and empowers your users.
-
-<Columns cols={2}>
-  <Card
-    title="Edit locally"
-    icon="pen-to-square"
-    href="/development"
-  >
-    Edit your docs locally and preview them in real time.
+<CardGroup cols={2}>
+  <Card title="Installation" icon="download" href="/installation">
+    Install Podman on Linux, macOS, or Windows and get your environment ready.
   </Card>
-  <Card
-    title="Customize your site"
-    icon="palette"
-    href="/essentials/settings"
-  >
-    Customize the design and colors of your site to match your brand.
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Pull an image, run your first container, and explore core Podman commands.
   </Card>
-    <Card
-    title="Set up navigation"
-    icon="map"
-    href="/essentials/navigation"
-  >
-    Organize your docs to help users find what they need and succeed with your product.
+  <Card title="Container Guide" icon="box" href="/guides/containers">
+    Learn to create, inspect, start, stop, and remove containers effectively.
   </Card>
-  <Card
-    title="API documentation"
-    icon="terminal"
-    href="/api-reference/introduction"
-  >
-    Auto-generate API documentation from OpenAPI specifications.
+  <Card title="Command Reference" icon="terminal" href="/commands/run">
+    Browse the full reference for every Podman command and flag.
   </Card>
-</Columns>
+</CardGroup>
 
-## Create beautiful pages
+## Why Podman?
 
-Everything you need to create world-class documentation.
+Podman is designed as a secure, flexible alternative to Docker with full OCI compliance and no mandatory daemon process.
 
-<Columns cols={2}>
-  <Card
-    title="Write with MDX"
-    icon="pen-fancy"
-    href="/essentials/markdown"
-  >
-    Use MDX to style your docs pages.
+<CardGroup cols={2}>
+  <Card title="Rootless containers" icon="shield" href="/advanced/rootless">
+    Run containers as a regular user with no elevated privileges required.
   </Card>
-  <Card
-    title="Code samples"
-    icon="code"
-    href="/essentials/code"
-  >
-    Add sample code to demonstrate how to use your product.
+  <Card title="Pod management" icon="layer-group" href="/guides/pods">
+    Group containers into pods that share networking and storage, like Kubernetes.
   </Card>
-  <Card
-    title="Images"
-    icon="image"
-    href="/essentials/images"
-  >
-    Display images and other media.
+  <Card title="Quadlet & systemd" icon="gear" href="/advanced/quadlet-systemd">
+    Manage containers declaratively via systemd unit files using Quadlet.
   </Card>
-  <Card
-    title="Reusable snippets"
-    icon="recycle"
-    href="/essentials/reusable-snippets"
-  >
-    Write once and reuse across your docs.
+  <Card title="Kubernetes integration" icon="cloud" href="/advanced/kubernetes">
+    Generate and apply Kubernetes YAML directly from running pods and containers.
   </Card>
-</Columns>
+</CardGroup>
 
-## Make your content agent ready
+## Get up and running
 
-Make your docs work for humans and AI agents alike.
+<Steps>
+  <Step title="Install Podman">
+    Install Podman for your platform. On Fedora/RHEL: `sudo dnf install podman`. On Ubuntu/Debian: `sudo apt install podman`. On macOS: `brew install podman`.
+  </Step>
+  <Step title="Run your first container">
+    Pull and run a container in one command:
+    ```bash
+    podman run -it docker.io/library/alpine sh
+    ```
+  </Step>
+  <Step title="List running containers">
+    See what's running with:
+    ```bash
+    podman ps
+    ```
+  </Step>
+  <Step title="Explore pods and volumes">
+    Group containers into pods or persist data with named volumes — see the [Guides](/guides/containers) section for full walkthroughs.
+  </Step>
+</Steps>
 
-<Columns cols={2}>
-  <Card
-    title="Prompt component"
-    icon="robot"
-    href="/agent-ready/prompt"
-  >
-    Embed shareable AI prompts readers can copy or open in Cursor.
-  </Card>
-  <Card
-    title="Visibility"
-    icon="eye"
-    href="/agent-ready/visibility"
-  >
-    Show different content to humans and agents reading your docs.
-  </Card>
-  <Card
-    title="Contextual menu"
-    icon="bolt"
-    href="/agent-ready/contextual"
-  >
-    Give readers one-click access to Claude, ChatGPT, Cursor, and more.
-  </Card>
-  <Card
-    title="AI coding tools"
-    icon="wand-magic-sparkles"
-    href="/ai-tools/claude-code"
-  >
-    Set up Claude Code, Cursor, or Windsurf with Mintlify's skill.
-  </Card>
-</Columns>
+## Key features
 
-## Need inspiration?
-
-<Card
-  title="See complete examples"
-  icon="stars"
-  href="https://mintlify.com/customers"
->
-  Browse our showcase of exceptional documentation sites.
-</Card>
+<AccordionGroup>
+  <Accordion title="Daemonless architecture">
+    Podman does not require a long-running background daemon. Each `podman` command runs as a direct child process, reducing your attack surface and idle resource usage. There is no single point of failure.
+  </Accordion>
+  <Accordion title="Docker-compatible CLI">
+    Podman's command-line interface is designed to be a drop-in replacement for Docker. Most users can `alias docker=podman` and continue working without changes. Podman also supports Docker Compose workflows via `podman compose`.
+  </Accordion>
+  <Accordion title="OCI and Docker image formats">
+    Podman supports both OCI image format and Docker image format. Pull from any OCI-compliant registry, including Docker Hub, Quay.io, GitHub Container Registry, and private registries.
+  </Accordion>
+  <Accordion title="REST API">
+    Podman exposes a REST API compatible with the Docker API as well as a Podman-native API with extended functionality. Use the Go bindings (`pkg/bindings`) to integrate Podman operations into your Go applications.
+  </Accordion>
+  <Accordion title="Cross-platform support">
+    Run Podman natively on Linux. On macOS and Windows, Podman manages a lightweight virtual machine (`podman machine`) that provides a Linux kernel for running containers, with seamless CLI integration.
+  </Accordion>
+</AccordionGroup>

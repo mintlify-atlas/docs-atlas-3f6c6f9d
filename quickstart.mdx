@@ -1,81 +1,275 @@
 ---
-title: "Quickstart"
-description: "Start building awesome documentation in minutes"
-icon: 'rocket'
+title: "Quickstart: Pull images and run your first container"
+description: "Pull an Alpine image, run an interactive shell, start a detached nginx server with port mapping, inspect logs, then stop and remove with Podman."
 ---
 
-## Get started in three steps
+This guide walks you through the core Podman workflow: pulling an image, running containers in both interactive and detached modes, checking what is running, viewing logs, and cleaning up. Every command shown here works the same on Linux and on macOS/Windows once your Podman machine is running. If you have not installed Podman yet, start with the [installation guide](/installation).
 
-Get your documentation site running locally and make your first customization.
+<Steps>
+  <Step title="Pull an image">
+    Pull the Alpine Linux image from Docker Hub. Podman uses fully qualified image references, so you specify the registry explicitly:
 
-### Step 1: Set up your local environment
+    ```bash
+    podman pull docker.io/library/alpine
+    ```
 
-<AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
-    
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
-  </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
-    
-    <Tip>Your preview updates automatically as you edit files.</Tip>
-  </Accordion>
-</AccordionGroup>
+    Podman downloads the image layers and stores them locally:
 
-### Step 2: Deploy your changes
+    ```text
+    Trying to pull docker.io/library/alpine:latest...
+    Getting image source signatures
+    Copying blob 9b3977197b4f done   |
+    Copying config 1d34ffeaf190 done   |
+    Writing manifest to image destination
+    docker.io/library/alpine:latest
+    ```
 
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
-    
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
+    List locally available images to confirm:
 
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
+    ```bash
+    podman images
+    ```
 
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
+    ```text
+    REPOSITORY                 TAG         IMAGE ID      CREATED       SIZE
+    docker.io/library/alpine   latest      1d34ffeaf190  2 weeks ago   7.67 MB
+    ```
+  </Step>
 
-### Step 3: Go live
+  <Step title="Run a container interactively">
+    Start an Alpine container with an interactive shell. The `-it` flags attach your terminal to the container's stdin and allocate a pseudo-TTY:
 
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
+    ```bash
+    podman run -it docker.io/library/alpine sh
+    ```
+
+    You are now inside the container:
+
+    ```text
+    / #
+    ```
+
+    Run a few commands to confirm you are in an isolated environment:
+
+    ```sh
+    cat /etc/os-release
+    ```
+
+    ```text
+    NAME="Alpine Linux"
+    ID=alpine
+    VERSION_ID=3.x.x
+    PRETTY_NAME="Alpine Linux v3.x"
+    HOME_URL="https://alpinelinux.org/"
+    ```
+
+    Exit the container when you are done:
+
+    ```sh
+    exit
+    ```
+
+    Because no `--name` was specified, Podman assigned a random name. The container exits when the shell process exits.
+  </Step>
+
+  <Step title="Run a detached container with port mapping">
+    Start an nginx web server in the background. The `-d` flag detaches the container and `-p 8080:80` maps port 8080 on your host to port 80 inside the container:
+
+    ```bash
+    podman run --name basic_httpd -d -p 8080:80 docker.io/nginx
+    ```
+
+    Podman prints the full container ID on success:
+
+    ```text
+    Trying to pull docker.io/library/nginx:latest...
+    Getting image source signatures
+    ...
+    f708641300564a6caf90c145e64cd852e76f77f6a41699478bb83a162dceada9
+    ```
+
+    <Note>
+      Rootless containers cannot bind ports below 1024 by default. Use a host port of 1024 or higher (like 8080) or switch your Podman machine to rootful mode if you need port 80 directly.
+    </Note>
+
+    Test the server by making an HTTP request to localhost:
+
+    ```bash
+    curl http://localhost:8080
+    ```
+
+    You should receive the nginx welcome page HTML in response.
+  </Step>
+
+  <Step title="List running containers">
+    Use `podman ps` to see all currently running containers:
+
+    ```bash
+    podman ps
+    ```
+
+    ```text
+    CONTAINER ID  IMAGE                   COMMAND               CREATED        STATUS        PORTS                 NAMES
+    f70864130056  docker.io/library/nginx  nginx -g daemon o...  2 minutes ago  Up 2 minutes  0.0.0.0:8080->80/tcp  basic_httpd
+    ```
+
+    To also see stopped containers, add the `-a` flag:
+
+    ```bash
+    podman ps -a
+    ```
+  </Step>
+
+  <Step title="View container logs">
+    Retrieve the stdout logs from the running nginx container. Use the container name or ID:
+
+    ```bash
+    podman logs basic_httpd
+    ```
+
+    After the curl request in the previous step, you should see an access log entry:
+
+    ```text
+    10.88.0.1 - - [07/Feb/2018:15:22:11 +0000] "GET / HTTP/1.1" 200 612 "-" "curl/7.55.1" "-"
+    ```
+
+    To follow logs in real time (like `tail -f`), add the `-f` flag:
+
+    ```bash
+    podman logs -f basic_httpd
+    ```
+
+    Press `Ctrl+C` to stop following.
+  </Step>
+
+  <Step title="Inspect a running container">
+    `podman inspect` returns detailed metadata about the container as JSON. Pipe through a filter to find specific fields — for example, the container's IP address:
+
+    ```bash
+    podman inspect basic_httpd | grep IPAddress
+    ```
+
+    ```text
+            "SecondaryIPAddresses": null,
+            "IPAddress": "",
+    ```
+
+    <Note>
+      In rootless mode, containers do not receive a routable IP address. Network traffic reaches them via port forwarding, which is why `curl http://localhost:8080` works while the `IPAddress` field is empty.
+    </Note>
+
+    You can also view the running processes inside the container:
+
+    ```bash
+    podman top basic_httpd
+    ```
+
+    ```text
+    UID   PID  PPID  C STIME TTY          TIME CMD
+      0 31873 31863  0 09:21 ?        00:00:00 nginx: master process nginx -g daemon off;
+    101 31889 31873  0 09:21 ?        00:00:00 nginx: worker process
+    ```
+  </Step>
+
+  <Step title="Stop a container">
+    Stop the running nginx container by name:
+
+    ```bash
+    podman stop basic_httpd
+    ```
+
+    Podman sends SIGTERM to the container process and waits for it to exit gracefully. The container is now stopped but still exists:
+
+    ```bash
+    podman ps -a
+    ```
+
+    ```text
+    CONTAINER ID  IMAGE                    COMMAND               CREATED        STATUS                     PORTS                 NAMES
+    f70864130056  docker.io/library/nginx  nginx -g daemon o...  5 minutes ago  Exited (0) 3 seconds ago   0.0.0.0:8080->80/tcp  basic_httpd
+    ```
+  </Step>
+
+  <Step title="Remove the container">
+    Remove the stopped container:
+
+    ```bash
+    podman rm basic_httpd
+    ```
+
+    Verify the container is gone:
+
+    ```bash
+    podman ps -a
+    ```
+
+    To remove a running container without stopping it first, use `podman rm -f`.
+
+    <Tip>
+      To remove a container automatically when it exits, pass `--rm` to `podman run`. This is useful for one-off commands where you do not need to inspect the container after it finishes.
+    </Tip>
+  </Step>
+</Steps>
+
+## Try the Podman hello container
+
+Podman ships a small demo container you can use to verify your setup at any time:
+
+```bash
+podman run quay.io/podman/hello
+```
+
+```text
+Trying to pull quay.io/podman/hello:latest...
+Getting image source signatures
+...
+!... Hello Podman World ...!
+
+         .--"--.
+       / -     - \
+      / (O)   (O) \
+   ~~~| -=(,Y,)=- |
+    .---. /`  \   |~~
+ ~/  o  o \~~~~.----. ~~
+  | =(X)= |~  / (O (O) \
+   ~~~~~~~  ~| =(Y_)=-  |
+  ~~~~    ~~~|   U      |~~
+
+Project:   https://github.com/containers/podman
+Website:   https://podman.io
+Documents: https://docs.podman.io
+```
+
+## Common commands reference
+
+| Task | Command |
+|---|---|
+| Pull an image | `podman pull docker.io/library/alpine` |
+| Run interactively | `podman run -it docker.io/library/alpine sh` |
+| Run detached with port | `podman run -d -p 8080:80 docker.io/nginx` |
+| List running containers | `podman ps` |
+| List all containers | `podman ps -a` |
+| View logs | `podman logs <name>` |
+| Follow logs | `podman logs -f <name>` |
+| Inspect container | `podman inspect <name>` |
+| View processes | `podman top <name>` |
+| Stop a container | `podman stop <name>` |
+| Remove a container | `podman rm <name>` |
+| Remove image | `podman rmi <image>` |
 
 ## Next steps
 
-Now that you have your docs running, explore these key features:
-
 <CardGroup cols={2}>
-
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
-
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
-
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
-
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
-
+  <Card title="Working with containers" icon="box" href="/guides/containers">
+    Learn exec, attach, commit, and advanced container management.
+  </Card>
+  <Card title="Working with images" icon="image" href="/guides/images">
+    Build images from Containerfiles and push to registries.
+  </Card>
+  <Card title="Pods" icon="layer-group" href="/guides/pods">
+    Group containers into pods that share network and storage.
+  </Card>
+  <Card title="Rootless containers" icon="shield" href="/advanced/rootless">
+    Understand user namespaces and rootless security model.
+  </Card>
 </CardGroup>
-
-<Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
-</Note>

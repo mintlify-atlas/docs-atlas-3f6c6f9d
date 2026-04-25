@@ -1,0 +1,211 @@
+---
+title: "podman volume — Create and manage persistent volumes"
+description: "Reference for podman volume subcommands. Create, inspect, export, import, and remove named volumes that persist data outside of container lifecycles."
+---
+
+Named volumes in Podman are independently managed storage units that exist outside of any specific container. They persist data across container restarts and removals, making them suitable for databases, configuration files, and any other state that needs to outlive a container's lifecycle. Volumes are stored under Podman's storage root (typically `~/.local/share/containers/storage/volumes/` for rootless users).
+
+## Subcommands
+
+| Subcommand | Description |
+|---|---|
+| `create` | Create a new volume. |
+| `exists` | Check if a given volume exists. |
+| `export` | Export a volume to an external tar archive. |
+| `import` | Import tarball contents into an existing volume. |
+| `inspect` | Get detailed information on one or more volumes. |
+| `ls` | List all available volumes. |
+| `mount` | Mount a volume filesystem on the host. |
+| `prune` | Remove all unused volumes. |
+| `reload` | Reload all volumes from volume plugins. |
+| `rm` | Remove one or more volumes. |
+| `unmount` | Unmount a volume. |
+
+## volume create
+
+Creates an empty volume. If no name is provided, a random name is generated. Metadata labels and driver-specific options can be set at creation time.
+
+### Key flags
+
+<AccordionGroup>
+  <Accordion title="--driver / -d">
+    Specify the volume driver. Podman has two built-in drivers:
+
+    - **`local`** (default): Uses a directory on disk. Supports `mount(8)`-style options via `--opt`.
+    - **`image`**: Uses an existing image as a backing store with an overlay filesystem on top.
+
+    Any other value causes Podman to look for a volume plugin with that name, configured in `containers.conf`.
+
+    ```bash
+    # Create a volume backed by a container image
+    podman volume create --driver image --opt image=fedora:latest fedoravol
+    ```
+  </Accordion>
+
+  <Accordion title="--opt / -o">
+    Set driver-specific options. For the `local` driver, supported keys are `type`, `device`, `o` (mount options), and `[no]copy`.
+
+    ```bash
+    # tmpfs volume limited to 100 MB
+    podman volume create --opt device=tmpfs --opt type=tmpfs --opt o=size=100m tmpvol
+    ```
+  </Accordion>
+
+  <Accordion title="--label / -l">
+    Attach key-value metadata to the volume. Labels are visible in `podman volume inspect` and can be used to filter in `podman volume ls`.
+
+    ```bash
+    podman volume create --label env=production --label team=backend dbdata
+    ```
+  </Accordion>
+
+  <Accordion title="--uid / --gid">
+    Set the UID and GID that will own the volume's mount point directory. This is distinct from passing `uid=`/`gid=` via `--opt o=`, which affects the mount itself.
+
+    ```bash
+    podman volume create --uid 1000 --gid 1000 appdata
+    ```
+  </Accordion>
+
+  <Accordion title="--ignore">
+    Do not fail if a volume with the same name already exists; instead print the existing name. New options are not applied to the existing volume.
+
+    ```bash
+    podman volume create --ignore myexistingvol
+    ```
+  </Accordion>
+</AccordionGroup>
+
+### Examples
+
+```bash
+# Create an anonymous volume (random name)
+podman volume create
+
+# Create a named volume
+podman volume create mydata
+
+# Create a volume with labels
+podman volume create --label project=myapp mydata
+
+# Create a tmpfs volume (in-memory, size-limited)
+podman volume create --opt device=tmpfs --opt type=tmpfs --opt o=size=200m,nodev,noexec tmpvol
+
+# Create a volume owned by a specific UID/GID
+podman volume create --uid 1000 --gid 1000 userdata
+
+# Create an image-backed volume
+podman volume create --driver image --opt image=fedora:latest fedoravol
+```
+
+## volume ls
+
+List all volumes known to Podman.
+
+```bash
+# List all volumes
+podman volume ls
+
+# Filter by label
+podman volume ls --filter label=env=production
+
+# Show only volume names (quiet)
+podman volume ls -q
+```
+
+## volume inspect
+
+Return detailed JSON information about one or more volumes, including the mount point, driver, labels, and options.
+
+```bash
+# Inspect a single volume
+podman volume inspect mydata
+
+# Inspect multiple volumes
+podman volume inspect mydata tmpvol
+
+# Extract just the mount path
+podman volume inspect --format '{{.Mountpoint}}' mydata
+```
+
+## volume rm
+
+Remove one or more volumes. Fails if the volume is currently in use by a container.
+
+<Warning>
+Removing a volume permanently deletes the data it contains. Use `--force` to skip the "in use" check, which also removes any containers using the volume.
+</Warning>
+
+```bash
+# Remove a volume
+podman volume rm mydata
+
+# Force removal even if used by a container
+podman volume rm --force mydata
+```
+
+## volume prune
+
+Remove all volumes that are not currently used by any container.
+
+```bash
+# Remove all unused volumes (prompts for confirmation)
+podman volume prune
+
+# Force prune without confirmation prompt
+podman volume prune --force
+
+# Prune only volumes matching a filter
+podman volume prune --filter label=env=staging
+```
+
+## volume export and import
+
+Export the contents of a volume to a tar archive, or import a tar archive into an existing volume.
+
+<Tip>
+Volume export and import are useful for backups, migrations between hosts, or seeding a new volume with initial data.
+</Tip>
+
+```bash
+# Export a volume to a tar file
+podman volume export mydata --output mydata-backup.tar
+
+# Import a tar archive into an existing volume
+podman volume import mydata mydata-backup.tar
+
+# Pipe export/import between hosts
+podman volume export mydata | ssh remotehost podman volume import remotedata -
+```
+
+## Common workflows
+
+```bash
+# Use a named volume with a container
+podman volume create dbdata
+podman run -d --name postgres \
+  -e POSTGRES_PASSWORD=secret \
+  -v dbdata:/var/lib/postgresql/data \
+  docker.io/library/postgres:15
+
+# Inspect volume contents by mounting it temporarily
+podman run --rm -v dbdata:/data docker.io/library/alpine ls /data
+
+# Back up a live volume
+podman volume export dbdata --output dbdata-$(date +%F).tar
+
+# Restore a volume from backup
+podman volume create dbdata-restore
+podman volume import dbdata-restore dbdata-backup.tar
+
+# Create a tmpfs scratch volume for build artifacts
+podman volume create \
+  --opt device=tmpfs \
+  --opt type=tmpfs \
+  --opt o=size=1g \
+  buildscratch
+podman run --rm -v buildscratch:/build my-builder make
+
+# Clean up unused volumes after development
+podman volume prune --force
+```

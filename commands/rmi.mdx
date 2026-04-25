@@ -1,0 +1,106 @@
+---
+title: 'podman rmi — remove container images from local storage'
+description: 'Delete one or more container images from local Podman storage, with options to force removal of dependent containers or remove all images at once.'
+---
+
+`podman rmi` removes one or more images from local Podman image storage. Along with the named image, Podman also removes any *dangling parent* images — parents that have no tag and are not referenced by any other image. You can remove images by name, tag, or short/full image ID.
+
+## Synopsis
+
+```bash
+podman rmi [options] image [...]
+podman image rm [options] image [...]
+```
+
+## Description
+
+Attempting to remove an image that is in use by a running or stopped container fails unless you also pass `--force`. Dangling parents of the specified image are pruned by default; use `--no-prune` to keep them. To remove an image from a remote registry (rather than local storage), use `skopeo delete` — most registries do not support remote deletion via the Podman CLI.
+
+<Warning>
+  `--force` removes **all containers** that reference the image before deleting it. Use with care in environments where stopped containers may contain important data or logs.
+</Warning>
+
+<Note>
+  To delete an image from a remote registry, use [skopeo delete](https://github.com/containers/skopeo/blob/main/docs/skopeo-delete.1.md). Some registries do not allow remote deletion at all.
+</Note>
+
+## Key flags
+
+<ParamField path="--all" type="boolean">
+  **Alias: `-a`**. Remove every image in local storage.
+</ParamField>
+
+<ParamField path="--force" type="boolean">
+  **Alias: `-f`**. Remove all containers that depend on the image before deleting the image itself. Without this flag, `podman rmi` refuses to delete an image that is referenced by any container.
+</ParamField>
+
+<ParamField path="--ignore" type="boolean">
+  **Alias: `-i`**. Silently skip any specified image that does not exist in local storage, rather than returning an error.
+</ParamField>
+
+<ParamField path="--no-prune" type="boolean">
+  Do not remove dangling parent layers of the specified image. By default, parents that become dangling after the removal are also deleted.
+</ParamField>
+
+## Exit status
+
+| Code | Meaning |
+|------|---------|
+| `0`  | All specified images removed successfully. |
+| `1`  | One or more images did not exist; no other failures occurred. |
+| `2`  | One or more images have child images or are used by a container. |
+| `125` | Command failed for any other reason. |
+
+## Examples
+
+Remove an image by its short ID:
+
+```bash
+podman rmi c0ed59d05ff7
+```
+
+Remove an image by name and tag:
+
+```bash
+podman rmi docker.io/library/alpine:latest
+```
+
+Remove multiple images in one command:
+
+```bash
+podman rmi c4dfb1609ee2 93fd78260bd1 c0ed59d05ff7
+```
+
+Force-remove an image and all containers that use it:
+
+```bash
+podman rmi --force myapp:old
+```
+
+Remove all local images and their dependent containers:
+
+```bash
+podman rmi -a -f
+```
+
+Ignore missing images (useful in cleanup scripts):
+
+```bash
+podman rmi --ignore nonexistent-image:latest
+```
+
+Remove an image but keep its parent layers:
+
+```bash
+podman rmi --no-prune d29200bf974d
+```
+
+Remove all dangling images using output from `podman images`:
+
+```bash
+podman images --filter dangling=true --quiet | xargs podman rmi
+```
+
+<Tip>
+  Use `podman image prune` to remove all dangling images in one step without needing to pipe through `xargs`.
+</Tip>

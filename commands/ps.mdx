@@ -1,0 +1,162 @@
+---
+title: "podman ps — List containers and their current status"
+description: "Print a table of running containers, or all containers with --all. Supports filtering, custom Go template formatting, and live polling with --watch."
+---
+
+`podman ps` lists containers on the local system along with their ID, image, command, creation time, status, port mappings, and name. By default it shows only running containers. Use `--all` to see containers in any state, including stopped, paused, and created containers.
+
+## Synopsis
+
+```bash
+podman ps [options]
+podman container ps [options]
+podman container list [options]
+podman container ls [options]
+```
+
+## Description
+
+`podman ps` queries the container runtime for current container state and prints a human-readable table. The output can be customized with a Go template via `--format`, filtered to a subset of containers via `--filter`, or refreshed on a periodic interval via `--watch`. Podman shares container storage with Buildah and CRI-O; containers managed by those tools appear when you pass `--external`.
+
+<Note>
+Podman shares container storage with tools like Buildah and CRI-O. Pass `--external` to include containers created by those engines alongside Podman-managed containers.
+</Note>
+
+## Key flags
+
+<ParamField path="--all, -a" type="boolean" default="false">
+  Show all containers regardless of state (running, stopped, paused, created, exited). Without this flag, only running containers are shown.
+</ParamField>
+
+<ParamField path="--filter, -f" type="string">
+  Filter containers by a key=value expression. Can be specified multiple times (all filters must match). Supported filter keys include:
+
+  | Key | Description |
+  |-----|-------------|
+  | `id` | Container ID (full or partial) |
+  | `name` | Container name |
+  | `status` | `created`, `running`, `paused`, `exited`, `stopped` |
+  | `label` | `key=value` label |
+  | `network` | Network name or ID |
+  | `volume` | Volume name or mount path |
+  | `pod` | Pod name or ID |
+  | `ancestor` | Image name or ID |
+</ParamField>
+
+<ParamField path="--format" type="string">
+  Format the output as JSON (`--format json`) or using a Go template. Template fields include `.ID`, `.Image`, `.Command`, `.Status`, `.Ports`, `.Names`, `.Labels`, `.Mounts`, `.Pod`, `.PodName`, `.State`, `.ExitCode`, and more. See the full list in the Go template table below.
+</ParamField>
+
+<ParamField path="--quiet, -q" type="boolean" default="false">
+  Print only container IDs, one per line. Useful for scripting: pipe into `podman stop`, `podman rm`, etc.
+</ParamField>
+
+<ParamField path="--last, -n" type="integer">
+  Print the last N created containers, across all states.
+</ParamField>
+
+<ParamField path="--latest, -l" type="boolean" default="false">
+  Show only the most recently created container (any state). Not available with the remote Podman client on Mac or Windows (excluding WSL2).
+</ParamField>
+
+<ParamField path="--no-trunc" type="boolean" default="false">
+  Do not truncate container IDs and command strings in the output. By default, long values are shortened to fit the terminal width.
+</ParamField>
+
+<ParamField path="--pod, -p" type="boolean" default="false">
+  Add `POD ID` and `PODNAME` columns to the output to show which pod, if any, each container belongs to.
+</ParamField>
+
+<ParamField path="--size, -s" type="boolean" default="false">
+  Add a `SIZE` column showing the total file size of each container's writable layer. This requires reading the filesystem and can be slow for large numbers of containers.
+</ParamField>
+
+<ParamField path="--sort" type="string" default="created">
+  Sort output by one of: `command`, `created`, `id`, `image`, `names`, `runningfor`, `size`, or `status`. Sorting by `size` sorts by rootfs size, not alphabetically.
+</ParamField>
+
+<ParamField path="--watch, -w" type="integer">
+  Refresh the container list every N seconds. Useful for monitoring container state changes in real time without running a separate `watch` command.
+</ParamField>
+
+## Examples
+
+### List running containers
+
+```bash
+podman ps
+```
+
+### List all containers including stopped ones
+
+```bash
+podman ps -a
+```
+
+### Show container IDs only (for scripting)
+
+```bash
+podman ps -aq
+```
+
+Stop all running containers:
+
+```bash
+podman stop $(podman ps -q)
+```
+
+### Filter by status
+
+```bash
+podman ps -a --filter status=exited
+```
+
+### Filter by label
+
+```bash
+podman ps --filter label=app=frontend
+```
+
+### Filter by name
+
+```bash
+podman ps --filter name=webserver
+```
+
+### Custom Go template output
+
+```bash
+podman ps -a --format "{{.ID}}  {{.Image}}  {{.Status}}  {{.Names}}"
+```
+
+Output container names and associated pod information:
+
+```bash
+podman ps --format "{{.Names}} is in pod {{.PodName}} ({{.Pod}})"
+```
+
+### List containers with pod information
+
+```bash
+podman ps --pod
+```
+
+### List containers sorted by name with sizes
+
+```bash
+podman ps -a --size --sort names
+```
+
+### Show external containers (Buildah, CRI-O)
+
+```bash
+podman ps --external -a
+```
+
+### Live monitoring
+
+Refresh every 2 seconds:
+
+```bash
+podman ps -w 2
+```

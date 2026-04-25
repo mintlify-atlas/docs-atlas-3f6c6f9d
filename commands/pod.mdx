@@ -1,0 +1,218 @@
+---
+title: "podman pod — Create and manage container pod groups"
+description: "Reference for podman pod subcommands. Create, inspect, start, stop, and remove pods — groups of containers sharing network and IPC namespaces in Podman."
+---
+
+Pods are groups of one or more containers that share the same network namespace, IPC namespace, and optionally other namespaces. Podman's pod model is inspired by Kubernetes pods. Each pod has an infra container that holds the namespaces open so workload containers can be added or removed without tearing down the shared environment.
+
+## Subcommands
+
+| Subcommand | Description |
+|---|---|
+| `clone` | Create a copy of an existing pod. |
+| `create` | Create a new pod. |
+| `exists` | Check if a pod exists in local storage. |
+| `inspect` | Display detailed information about a pod. |
+| `kill` | Send a signal to the main process of each container in one or more pods. |
+| `logs` | Display logs for all containers in a pod. |
+| `pause` | Pause one or more pods. |
+| `prune` | Remove all stopped pods and their containers. |
+| `ps` | List pods and their container counts. |
+| `restart` | Restart one or more pods. |
+| `rm` | Remove one or more stopped pods and their containers. |
+| `start` | Start one or more pods. |
+| `stats` | Display a live stream of resource usage stats for containers in one or more pods. |
+| `stop` | Stop one or more pods. |
+| `top` | Display running processes of containers in a pod. |
+| `unpause` | Unpause one or more pods. |
+
+## pod create
+
+Creates an empty pod and prepares it to receive containers. If no name is specified, a random name is generated. The pod ID is printed to stdout.
+
+<Note>
+Resource limit flags (such as `--cpus`) set limits in the pod's cgroup parent. Individual containers can override these limits when joining the pod. Containers that use `--cgroupns=host` do not receive pod-level cgroup resources.
+</Note>
+
+### Key flags
+
+<AccordionGroup>
+  <Accordion title="--name">
+    Assign a name to the pod. Without this flag, a random string is generated.
+
+    ```bash
+    podman pod create --name mypod
+    ```
+  </Accordion>
+
+  <Accordion title="--cpus">
+    Set the total number of CPUs delegated to the pod. Defaults to `0.000` (no limit).
+
+    ```bash
+    podman pod create --name mypod --cpus 2
+    ```
+  </Accordion>
+
+  <Accordion title="--dns">
+    Set custom DNS servers in `/etc/resolv.conf`, shared across all containers in the pod. Use `none` to disable creation of `/etc/resolv.conf`.
+
+    ```bash
+    podman pod create --dns 8.8.8.8 --name mypod
+    ```
+  </Accordion>
+
+  <Accordion title="--exit-policy">
+    Controls what happens when the last container in the pod exits.
+
+    | Policy | Behavior |
+    |---|---|
+    | `continue` (default) | Keep the infra container running. |
+    | `stop` | Stop the pod (including the infra container). Used by `kube play` and Quadlets. |
+
+    ```bash
+    podman pod create --exit-policy stop --name mypod
+    ```
+  </Accordion>
+
+  <Accordion title="--publish / -p">
+    Publish container ports to the host. Port mappings are applied at the pod level so all containers in the pod share them.
+
+    ```bash
+    podman pod create --name webpod -p 8080:80
+    ```
+  </Accordion>
+</AccordionGroup>
+
+### Examples
+
+```bash
+# Create a pod with a name
+podman pod create --name mypod
+
+# Create a pod that exposes port 8080 on the host
+podman pod create --name webpod -p 8080:80
+
+# Create a pod limited to 2 CPUs and 512 MB memory
+podman pod create --name mypod --cpus 2 --memory 512m
+
+# Add a container to an existing pod
+podman create --pod mypod --name app docker.io/library/nginx:latest
+podman pod start mypod
+```
+
+## pod ps
+
+Lists all pods and a summary of their containers.
+
+```bash
+# List all pods
+podman pod ps
+
+# Show all pods including stopped ones, with extra detail
+podman pod ps --sort name
+
+# Show pod IDs only
+podman pod ps -q
+```
+
+## pod start / stop
+
+Start or stop one or more pods by name or ID.
+
+```bash
+# Start a pod
+podman pod start mypod
+
+# Stop a pod (sends SIGTERM, then SIGKILL after timeout)
+podman pod stop mypod
+
+# Stop a pod with a custom timeout (seconds)
+podman pod stop --time 30 mypod
+```
+
+## pod restart
+
+Stops and then starts all containers in one or more pods.
+
+```bash
+podman pod restart mypod
+```
+
+## pod inspect
+
+Returns detailed JSON information about a pod, including its containers, network settings, and resource limits.
+
+```bash
+podman pod inspect mypod
+
+# Extract a specific field with Go templates
+podman pod inspect --format '{{.Name}} {{.NumContainers}}' mypod
+```
+
+## pod logs
+
+Stream or print the combined logs from all containers in a pod.
+
+```bash
+# Follow logs for all containers in the pod
+podman pod logs -f mypod
+
+# Show logs for a specific container inside the pod
+podman pod logs --container app mypod
+```
+
+## pod stats
+
+Display a live table of CPU, memory, and I/O usage for all containers in a pod.
+
+```bash
+# Live streaming stats
+podman pod stats mypod
+
+# Stats for all pods
+podman pod stats --all
+
+# One-shot output (no stream)
+podman pod stats --no-stream mypod
+```
+
+## pod rm
+
+Remove one or more stopped pods and all their containers.
+
+<Warning>
+`podman pod rm` removes the pod and all containers inside it. Use `--force` to remove a running pod without stopping it first.
+</Warning>
+
+```bash
+# Remove a stopped pod
+podman pod rm mypod
+
+# Force-remove a running pod
+podman pod rm --force mypod
+
+# Remove all stopped pods
+podman pod prune
+```
+
+## Common workflows
+
+```bash
+# Full lifecycle: create, populate, start, inspect, then clean up
+podman pod create --name demo -p 8080:80
+podman create --pod demo --name web docker.io/library/nginx:latest
+podman pod start demo
+podman pod inspect demo
+podman pod stop demo
+podman pod rm demo
+
+# Run a two-container pod (nginx + sidecar)
+podman pod create --name webapp -p 80:80
+podman run -d --pod webapp --name frontend docker.io/library/nginx:latest
+podman run -d --pod webapp --name logger docker.io/library/alpine:latest sh -c "tail -f /dev/null"
+podman pod ps
+
+# List pods, then prune all stopped ones
+podman pod ps
+podman pod prune
+```

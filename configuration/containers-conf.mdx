@@ -1,0 +1,266 @@
+---
+title: "Set Podman defaults and behavior with containers.conf"
+description: "Set persistent defaults for containers, the engine, networking, and machines in containers.conf. Covers file locations, load order, and key options."
+---
+
+`containers.conf` is a TOML configuration file that controls the default behavior of Podman (and other container tools built on the containers stack, such as Buildah). Almost every option that you can pass on the command line can be set as a persistent default here, so that you do not have to repeat it on every invocation.
+
+## File locations and load order
+
+Podman reads up to three `containers.conf` files in the following order. Settings in a later file override settings in an earlier one:
+
+1. `/usr/share/containers/containers.conf` — distribution defaults (do not edit)
+2. `/etc/containers/containers.conf` — system-wide overrides (requires root)
+3. `$XDG_CONFIG_HOME/containers/containers.conf` or `~/.config/containers/containers.conf` — per-user overrides
+
+Create the per-user file if it does not exist:
+
+```bash
+mkdir -p ~/.config/containers
+touch ~/.config/containers/containers.conf
+```
+
+## File structure
+
+The file is divided into named sections. Each section corresponds to a different layer of Podman behavior:
+
+```toml
+[containers]
+# Defaults applied to every container
+
+[engine]
+# Container engine behavior (runtime, cgroup manager, etc.)
+
+[network]
+# Networking defaults
+
+[machine]
+# Podman machine (VM) defaults
+
+[secrets]
+# Secret driver configuration
+```
+
+## \[containers\] section
+
+These settings apply to every container Podman creates unless overridden on the command line.
+
+### default_capabilities
+
+The list of Linux capabilities granted to containers. Reducing this list hardens container isolation.
+
+```toml
+[containers]
+default_capabilities = [
+  "CHOWN",
+  "DAC_OVERRIDE",
+  "FOWNER",
+  "FSETID",
+  "KILL",
+  "NET_BIND_SERVICE",
+  "SETFCAP",
+  "SETGID",
+  "SETPCAP",
+  "SETUID",
+  "SYS_CHROOT",
+]
+```
+
+### log_driver
+
+Controls where container log output is written. Valid values are `k8s-file` and `journald`.
+
+```toml
+[containers]
+log_driver = "journald"
+```
+
+### userns
+
+Default user namespace mode for containers. Common values:
+
+| Value | Description |
+|-------|-------------|
+| `host` | Share the host user namespace (default) |
+| `private` | Create a private user namespace without UID mappings |
+| `auto` | Automatically allocate a unique user namespace |
+| `keep-id` | Map the current user's UID/GID to the same values inside the container |
+| `no-map` | Like `keep-id` but without mapping the current user inside the container |
+
+```toml
+[containers]
+userns = "keep-id"
+```
+
+### default_sysctls
+
+Sysctls applied to every container at creation time.
+
+```toml
+[containers]
+default_sysctls = [
+  "net.ipv4.ping_group_range=0 0",
+]
+```
+
+### ipcns, pidns, utsns, netns
+
+Default namespace modes for IPC, PID, UTS, and network namespaces. See `podman-run(1)` for accepted values for each.
+
+```toml
+[containers]
+ipcns = "shareable"
+pidns = "private"
+utsns = "private"
+```
+
+### pids_limit
+
+Maximum number of processes inside a container. Set to `0` for unlimited.
+
+```toml
+[containers]
+pids_limit = 2048
+```
+
+## \[engine\] section
+
+Controls how Podman's container engine operates.
+
+### runtime
+
+The OCI runtime used to run containers. Default is `crun`; other valid values include `runc` and `kata`.
+
+```toml
+[engine]
+runtime = "crun"
+```
+
+### cgroup_manager
+
+Controls the cgroup management backend. Valid values are `systemd` (default on systemd hosts) and `cgroupfs`.
+
+```toml
+[engine]
+cgroup_manager = "systemd"
+```
+
+### events_logger
+
+Where Podman emits container lifecycle events. Valid values: `journald`, `file`, `none`.
+
+```toml
+[engine]
+events_logger = "journald"
+```
+
+### pull_policy
+
+When to pull images before running a container. Valid values: `missing`, `always`, `never`, `newer`.
+
+```toml
+[engine]
+pull_policy = "missing"
+```
+
+### stop_timeout
+
+Seconds to wait for a container to exit gracefully before sending `SIGKILL`.
+
+```toml
+[engine]
+stop_timeout = 10
+```
+
+## \[network\] section
+
+Controls Podman's networking layer, which uses [netavark](https://github.com/containers/netavark) as the backend.
+
+### network_backend
+
+The network driver. The only supported value is `netavark`.
+
+```toml
+[network]
+network_backend = "netavark"
+```
+
+### default_network
+
+Name of the default bridge network used by rootful containers.
+
+```toml
+[network]
+default_network = "podman"
+```
+
+### default_subnet
+
+Subnet for the default network. Do not change this while containers are running on the default network.
+
+```toml
+[network]
+default_subnet = "10.88.0.0/16"
+```
+
+### default_rootless_network_cmd
+
+Network program used for rootless containers. Valid values: `pasta` (default) and `slirp4netns`.
+
+```toml
+[network]
+default_rootless_network_cmd = "pasta"
+```
+
+### firewall_driver
+
+Firewall backend used by netavark. Valid values: `nftables`, `firewalld`, `none`.
+
+```toml
+[network]
+firewall_driver = "nftables"
+```
+
+## \[machine\] section
+
+Sets resource defaults for VMs created by `podman machine init`.
+
+```toml
+[machine]
+cpus = 2
+memory = 2048
+disk_size = 100
+```
+
+<Tip>
+Values set here become the defaults for `podman machine init`. You can still override them with command-line flags such as `--cpus`, `--memory`, and `--disk-size`.
+</Tip>
+
+## Verifying your configuration
+
+Print the effective merged configuration:
+
+```bash
+podman info --format json | jq .store
+```
+
+Or check a specific default directly:
+
+```bash
+podman info --format '{{.Host.CgroupManager}}'
+```
+
+## Example minimal user override
+
+A common per-user configuration that sets journald logging and a shorter stop timeout:
+
+```toml
+[containers]
+log_driver = "journald"
+
+[engine]
+stop_timeout = 5
+cgroup_manager = "systemd"
+```
+
+Save this to `~/.config/containers/containers.conf`. No restart or reload is required — Podman reads the file on every invocation.

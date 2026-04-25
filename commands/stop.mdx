@@ -1,0 +1,110 @@
+---
+title: "podman stop — Stop one or more running containers"
+description: "Send SIGTERM to running containers and wait for a graceful shutdown, falling back to SIGKILL after a configurable timeout. Supports bulk stop with --all."
+---
+
+`podman stop` stops one or more running containers by sending SIGTERM to the main process and then waiting for the container to exit. If the container does not stop within the configured timeout (default: 10 seconds), Podman sends SIGKILL to forcibly terminate it. The initial signal can be customized via the image or at container creation time with `--stop-signal`.
+
+## Synopsis
+
+```bash
+podman stop [options] CONTAINER [CONTAINER...]
+podman container stop [options] CONTAINER [CONTAINER...]
+```
+
+## Description
+
+Containers are identified by their name or ID. Multiple containers can be stopped in a single invocation by listing them space-separated. `podman stop` does not remove containers; stopped containers persist and can be inspected, restarted, or removed later. Use `podman rm` to delete them.
+
+<Note>
+`podman stop` does not affect paused containers. Paused containers remain paused; use `podman unpause` first if you need to stop them.
+</Note>
+
+## Key flags
+
+<ParamField path="--all, -a" type="boolean" default="false">
+  Stop all currently running containers. Paused containers are not affected. Equivalent to running `podman stop $(podman ps -q)`.
+</ParamField>
+
+<ParamField path="--time, -t" type="integer" default="10">
+  Number of seconds to wait for the container to stop gracefully after SIGTERM before sending SIGKILL. Set to `0` to skip the grace period and send SIGKILL immediately.
+</ParamField>
+
+<ParamField path="--filter, -f" type="string">
+  Stop containers that match a filter expression instead of specifying them by name or ID. Supported filter keys include `name`, `label`, `status`, `network`, `id`, and others. Can be specified multiple times; all filters must match.
+</ParamField>
+
+<ParamField path="--cidfile" type="string">
+  Read the container ID from the given file. Can be specified multiple times to stop several containers whose IDs were recorded in separate files by `podman run --cidfile`.
+</ParamField>
+
+<ParamField path="--ignore" type="boolean" default="false">
+  Do not report an error if a specified container does not exist or is already stopped. Useful in cleanup scripts where the container's existence is uncertain.
+</ParamField>
+
+<ParamField path="--latest, -l" type="boolean" default="false">
+  Stop the most recently created container. Not available with the remote Podman client on Mac or Windows (excluding WSL2).
+</ParamField>
+
+## Examples
+
+### Stop a container by name
+
+```bash
+podman stop mywebserver
+```
+
+### Stop a container by ID
+
+```bash
+podman stop 860a4b235279
+```
+
+### Stop multiple containers at once
+
+```bash
+podman stop mywebserver 860a4b235279
+```
+
+### Stop with a custom grace period
+
+Give the container only 2 seconds to shut down gracefully:
+
+```bash
+podman stop --time 2 860a4b235279
+```
+
+Force immediate termination (no grace period):
+
+```bash
+podman stop --time 0 mycontainer
+```
+
+### Stop all running containers
+
+```bash
+podman stop -a
+```
+
+### Stop using a cidfile
+
+```bash
+podman stop --cidfile /home/user/cidfile-1
+podman stop --cidfile /home/user/cidfile-1 --cidfile ./cidfile-2
+```
+
+### Stop by label
+
+```bash
+podman stop --filter label=app=frontend
+```
+
+### Stop by name pattern
+
+```bash
+podman stop --filter name=db-replica
+```
+
+<Tip>
+To stop and immediately remove a container, combine `podman stop` with `podman rm`, or use `podman rm -f` which forces removal of running containers in a single step.
+</Tip>

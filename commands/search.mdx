@@ -1,0 +1,123 @@
+---
+title: 'podman search — find container images on registries'
+description: 'Search one or more container registries for images matching a term, with support for filtering results, listing tags, and customizing output format.'
+---
+
+`podman search` queries one or more registries for images whose name or description matches the given term. By default Podman searches every registry listed as an unqualified-search registry in `containers-registries.conf`. You can scope a search to a specific registry by prefixing the search term with the registry hostname (e.g., `registry.fedoraproject.org/fedora`).
+
+## Synopsis
+
+```bash
+podman search [options] term
+```
+
+## Description
+
+The default result limit is 25 entries per registry. When multiple registries are searched, the limit applies to each independently, so the total number of results can exceed the limit. Results are ordered as the registry API returns them — there is no global sort across registries. To list all available tags for a specific image rather than searching for images by name, use the `--list-tags` flag.
+
+<Note>
+  `podman search` is not a reliable presence check for a specific image. Registry search behavior varies widely between implementations; some registries do not support search at all.
+</Note>
+
+<Warning>
+  Searching without a search term (registry-only queries like `registry.fedoraproject.org/`) only works with registries that implement the Docker Distribution v2 API.
+</Warning>
+
+## Key flags
+
+<ParamField path="--limit" type="integer" default="25">
+  Maximum number of results to return per registry. When more than one registry is searched, each registry returns up to this many results independently.
+</ParamField>
+
+<ParamField path="--filter" type="string">
+  Filter results. Supported expressions:
+  - `is-automated=true|false` — only automated builds.
+  - `is-official=true|false` — only official images.
+  - `stars=N` — only images with at least N stars.
+</ParamField>
+
+<ParamField path="--format" type="string">
+  Format output using a Go template. Available placeholders: `.Name`, `.Description`, `.Index`, `.Stars`, `.Official`, `.Automated`, `.Tag` (only when `--list-tags` is set).
+</ParamField>
+
+<ParamField path="--list-tags" type="boolean">
+  List available tags for the specified image instead of searching by name. Requires a fully-qualified image name as the search term. Returns one line per tag. Only works with v2 API registries.
+</ParamField>
+
+<ParamField path="--no-trunc" type="boolean">
+  Do not truncate the description field in the default table output.
+</ParamField>
+
+<ParamField path="--tls-verify" type="boolean" default="true">
+  Require HTTPS and verify TLS certificates when contacting the registry. Set to `false` for insecure private registries.
+</ParamField>
+
+<ParamField path="--authfile" type="string">
+  Path to a JSON authentication file for searching authenticated or private registries.
+</ParamField>
+
+<ParamField path="--compatible" type="boolean">
+  Show Docker Hub-style Stars, Official, and Automated columns in addition to name and description. These fields are not populated by most public registries other than Docker Hub.
+</ParamField>
+
+## Examples
+
+Search for Fedora images across all configured registries, limited to 3 per registry:
+
+```bash
+podman search --limit 3 fedora
+```
+
+```
+NAME                                           DESCRIPTION
+registry.fedoraproject.org/f31/fedora-toolbox
+docker.io/library/fedora                       Official Docker builds of Fedora
+quay.io/fedora/fedora
+```
+
+Search on a specific registry only:
+
+```bash
+podman search registry.access.redhat.com/ubi9
+```
+
+Search with a custom format showing name, stars, and official status:
+
+```bash
+podman search --format "{{.Name}}\t{{.Stars}}\t{{.Official}}" alpine --limit 3
+```
+
+List all available tags for an image:
+
+```bash
+podman search --list-tags registry.access.redhat.com/ubi8 --limit 10
+```
+
+```
+NAME                             TAG
+registry.access.redhat.com/ubi8  8.4-211
+registry.access.redhat.com/ubi8  8.4-199
+registry.access.redhat.com/ubi8  latest
+```
+
+Filter to show only official images:
+
+```bash
+podman search --filter is-official=true --limit 5 python
+```
+
+Search a private registry with authentication:
+
+```bash
+podman search --authfile ~/.config/myauths.json registry.internal.example.com/
+```
+
+Search without TLS verification:
+
+```bash
+podman search --tls-verify=false registry.internal.example.com/myapp
+```
+
+<Tip>
+  To see Stars, Official, and Automated columns (Docker Hub metadata), add the `--compatible` flag. These fields are blank for most registries other than Docker Hub.
+</Tip>

@@ -1,0 +1,210 @@
+---
+title: "podman compose — Run Docker Compose files with Podman"
+description: "Reference for podman compose. Delegates docker-compose.yml execution to docker-compose or podman-compose while connecting them to the Podman API socket."
+---
+
+`podman compose` is a thin wrapper that lets you run standard `docker-compose.yml` files with Podman as the container backend. It delegates all compose logic to an external provider — either `docker-compose` or `podman-compose` — but configures the provider's environment so it communicates with the local Podman API socket rather than the Docker daemon. All compose subcommands (`up`, `down`, `ps`, `logs`, etc.) and flags are passed directly to the provider, so existing workflows work without modification.
+
+<Note>
+`podman compose` does not implement Compose itself. You must have `docker-compose` or `podman-compose` installed separately. If `docker-compose` is installed it takes precedence, as it is the original implementation of the Compose specification.
+</Note>
+
+## How it works
+
+When you run `podman compose <args>`, Podman:
+
+1. Locates the compose provider binary (`docker-compose` or `podman-compose` by default).
+2. Sets `DOCKER_HOST` (or the equivalent) to point at the local Podman socket.
+3. Executes the provider with the arguments you passed, transparently bridging it to Podman.
+
+The Podman socket must be running before you invoke `podman compose`. For rootless use, start it with:
+
+```bash
+systemctl --user start podman.socket
+```
+
+## Provider configuration
+
+You can override which binary is used as the compose provider in two ways:
+
+**`containers.conf`** (persistent):
+
+```toml
+[engine]
+compose_providers = ["/usr/local/bin/docker-compose"]
+```
+
+**Environment variable** (per-session):
+
+```bash
+export PODMAN_COMPOSE_PROVIDER=/usr/local/bin/podman-compose
+podman compose up
+```
+
+To suppress the warning that Podman emits when delegating to an external binary:
+
+```toml
+# containers.conf
+[engine]
+compose_warning_logs = false
+```
+
+Or:
+
+```bash
+export PODMAN_COMPOSE_WARNING_LOGS=false
+```
+
+## Basic usage
+
+All arguments after `podman compose` are forwarded verbatim to the provider. The following examples use standard Compose CLI syntax.
+
+```bash
+# Start all services defined in docker-compose.yml
+podman compose up
+
+# Start services in detached (background) mode
+podman compose up -d
+
+# Build images before starting
+podman compose up --build -d
+
+# Stop and remove containers, networks, and volumes
+podman compose down
+
+# Remove volumes as well
+podman compose down --volumes
+
+# View running services
+podman compose ps
+
+# Stream logs from all services
+podman compose logs -f
+
+# Stream logs from a specific service
+podman compose logs -f webserver
+
+# Run a one-off command in a service container
+podman compose run --rm app sh
+
+# Scale a service to 3 replicas
+podman compose up -d --scale worker=3
+
+# Pull updated images without starting
+podman compose pull
+
+# Restart a specific service
+podman compose restart webserver
+```
+
+## Example docker-compose.yml
+
+The following file defines a typical web + database stack. It works identically with `docker-compose` and `podman compose`.
+
+```yaml
+version: "3.9"
+
+services:
+  db:
+    image: docker.io/library/postgres:15
+    environment:
+      POSTGRES_PASSWORD: secret
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  web:
+    image: docker.io/library/nginx:latest
+    ports:
+      - "8080:80"
+    depends_on:
+      - db
+
+volumes:
+  pgdata:
+```
+
+Start it with Podman:
+
+```bash
+# Ensure the socket is running (rootless)
+systemctl --user start podman.socket
+
+# Start the stack
+podman compose up -d
+
+# Check service status
+podman compose ps
+
+# Tear down
+podman compose down --volumes
+```
+
+## Using docker-compose directly
+
+Because `podman compose` simply sets `DOCKER_HOST`, you can also call `docker-compose` directly after setting the variable yourself:
+
+```bash
+export DOCKER_HOST=unix://$XDG_RUNTIME_DIR/podman/podman.sock
+docker-compose up -d
+```
+
+<Tip>
+Add the `DOCKER_HOST` export to your shell profile (`~/.bashrc`, `~/.zshrc`, etc.) if you want all `docker-compose` invocations to use Podman automatically.
+</Tip>
+
+## Rootful vs rootless
+
+| | Rootless | Rootful |
+|---|---|---|
+| Socket path | `$XDG_RUNTIME_DIR/podman/podman.sock` | `/run/podman/podman.sock` |
+| Start socket | `systemctl --user start podman.socket` | `sudo systemctl start podman.socket` |
+| Requires sudo | No | Yes |
+| Supports macvlan networking | No | Yes |
+
+```bash
+# Rootful compose (e.g., when you need macvlan or privileged containers)
+sudo systemctl start podman.socket
+sudo PODMAN_COMPOSE_PROVIDER=docker-compose \
+  DOCKER_HOST=unix:///run/podman/podman.sock \
+  docker-compose up -d
+```
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Cannot connect to the Docker daemon">
+    The compose provider cannot find the Podman socket. Ensure it is running:
+
+    ```bash
+    # Rootless
+    systemctl --user start podman.socket
+    systemctl --user status podman.socket
+
+    # Then re-export DOCKER_HOST if calling docker-compose directly
+    export DOCKER_HOST=unix://$XDG_RUNTIME_DIR/podman/podman.sock
+    ```
+  </Accordion>
+
+  <Accordion title="No compose provider found">
+    `podman compose` cannot locate `docker-compose` or `podman-compose`. Install one:
+
+    ```bash
+    # Install docker-compose (v2 plugin)
+    pip3 install --user docker-compose
+
+    # Or install podman-compose
+    pip3 install --user podman-compose
+
+    # Or point to a custom path
+    export PODMAN_COMPOSE_PROVIDER=/usr/local/bin/my-compose
+    ```
+  </Accordion>
+
+  <Accordion title="Permission denied on the socket">
+    The compose provider cannot access the Podman socket. For rootless sockets, only the owning user can connect. Verify `$XDG_RUNTIME_DIR` is set and the socket file exists:
+
+    ```bash
+    ls -la $XDG_RUNTIME_DIR/podman/podman.sock
+    ```
+  </Accordion>
+</AccordionGroup>

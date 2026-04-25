@@ -1,0 +1,234 @@
+---
+title: "Group containers into pods with Podman pod commands"
+description: "Create and manage Podman pods — groups of containers sharing a network namespace. Covers pod lifecycle, sidecars, and Kubernetes YAML compatibility."
+---
+
+A pod is a group of one or more containers that share the same network namespace, meaning they communicate over localhost and see each other's exposed ports directly. This concept maps closely to a Kubernetes pod — in fact, Podman pods were designed with Kubernetes compatibility in mind, and you can generate Kubernetes YAML from a running Podman pod using `podman generate kube`. Pods are useful when multiple containers need to collaborate tightly, such as an application container paired with a logging sidecar or a proxy.
+
+## How pods work
+
+When you create a pod, Podman starts a lightweight **infra container** (also called the "pause container") that holds the shared kernel namespaces — primarily the network namespace. All containers added to the pod join that namespace, so they share an IP address and can reach each other via `localhost`. The infra container is transparent to your workloads and requires no management.
+
+<Note>
+  Containers in the same pod share the network namespace but have separate filesystem, process, and IPC namespaces by default. A port exposed by one container is visible to all other containers in the pod via `localhost`.
+</Note>
+
+## Creating a pod
+
+Use `podman pod create` to create a pod before adding containers to it.
+
+<Steps>
+  <Step title="Create a pod with a name and port mapping">
+    Port mappings must be declared on the pod, not on individual containers, because the network namespace belongs to the pod:
+
+    ```bash
+    podman pod create --name mypod -p 8080:80
+    ```
+
+    Podman prints the pod ID. The pod is created in the `Created` state with only the infra container running.
+  </Step>
+
+  <Step title="Add containers to the pod">
+    Use `podman run --pod` to start containers inside the pod. The container joins the pod's network namespace:
+
+    ```bash
+    podman run -d --pod mypod --name webserver docker.io/nginx
+    ```
+
+    Add a second container to the same pod:
+
+    ```bash
+    podman run -d --pod mypod --name logger docker.io/busybox \
+      sh -c "while true; do sleep 60; done"
+    ```
+  </Step>
+
+  <Step title="Verify the pod and its containers">
+    List all pods:
+
+    ```bash
+    podman pod ps
+    ```
+
+    Show containers associated with a specific pod:
+
+    ```bash
+    podman pod ps --ctr-names
+    ```
+
+    Or use `podman ps` to see all containers with their pod association:
+
+    ```bash
+    podman ps -a --pod
+    ```
+  </Step>
+</Steps>
+
+## Pod lifecycle
+
+<Tabs>
+  <Tab title="Start and stop">
+    Start all containers in a pod:
+
+    ```bash
+    podman pod start mypod
+    ```
+
+    Stop all containers in a pod gracefully:
+
+    ```bash
+    podman pod stop mypod
+    ```
+
+    Restart all containers in a pod:
+
+    ```bash
+    podman pod restart mypod
+    ```
+  </Tab>
+
+  <Tab title="Remove">
+    Remove a stopped pod and all its containers:
+
+    ```bash
+    podman pod rm mypod
+    ```
+
+    Force-remove a running pod and all its containers:
+
+    ```bash
+    podman pod rm -f mypod
+    ```
+
+    Remove all stopped pods and their containers:
+
+    ```bash
+    podman pod prune
+    ```
+  </Tab>
+</Tabs>
+
+## Inspecting a pod
+
+`podman pod inspect` returns detailed JSON about the pod, including its ID, name, state, infra container ID, and the list of member containers:
+
+```bash
+podman pod inspect mypod
+```
+
+To view live resource usage across all containers in a pod:
+
+```bash
+podman pod stats mypod
+```
+
+To view running processes across all containers in a pod:
+
+```bash
+podman pod top mypod
+```
+
+To read logs from all containers in a pod:
+
+```bash
+podman pod logs mypod
+```
+
+## Full example: web app with a sidecar
+
+The following example creates a pod that exposes port 8080 on the host, runs nginx as the main application container, and runs a busybox sidecar that can access nginx over localhost:
+
+```bash
+# Create the pod with a port mapping
+podman pod create --name webapp -p 8080:80
+
+# Start the nginx container inside the pod
+podman run -d --pod webapp --name web docker.io/nginx
+
+# Start a sidecar container in the same pod
+podman run -d --pod webapp --name sidecar docker.io/busybox \
+  sh -c "while true; do wget -qO- http://localhost/; sleep 30; done"
+
+# List the pod and its containers
+podman pod ps
+podman ps --pod
+
+# Test access from the host
+curl http://localhost:8080
+
+# View nginx logs
+podman logs web
+
+# Inspect the pod
+podman pod inspect webapp
+
+# Stop and clean up
+podman pod stop webapp
+podman pod rm webapp
+```
+
+<Tip>
+  Because the sidecar container uses `http://localhost/`, it reaches the nginx container directly through the shared network namespace — no inter-container networking or service discovery needed.
+</Tip>
+
+## Kubernetes compatibility
+
+Podman pods are designed to align with the Kubernetes pod model. You can:
+
+- Generate a Kubernetes Pod YAML file from a running Podman pod with `podman generate kube mypod`
+- Recreate a pod from Kubernetes YAML with `podman kube play pod.yaml`
+
+This makes Podman a useful local development environment for Kubernetes workloads without requiring a full cluster.
+
+<Warning>
+  Port mappings, volume mounts, and other pod-level settings must be specified at pod creation time (`podman pod create`). You cannot add or change them after the pod is created.
+</Warning>
+
+## Pod subcommand reference
+
+<AccordionGroup>
+  <Accordion title="podman pod create">
+    Create a new empty pod. Key options:
+
+    | Option | Description |
+    |--------|-------------|
+    | `--name` | Assign a name to the pod |
+    | `-p host:container` | Map a host port to a container port |
+    | `--dns` | Set custom DNS servers shared across all containers |
+    | `--hostname` | Set the hostname for the pod |
+    | `--cpus` | Limit total CPU usage for all containers in the pod |
+  </Accordion>
+
+  <Accordion title="podman pod ps">
+    List pods and their status. Use `--ctr-names` to include container names, or `--format` for custom output.
+
+    ```bash
+    podman pod ps --ctr-names
+    ```
+  </Accordion>
+
+  <Accordion title="podman pod inspect">
+    Return full JSON metadata for one or more pods.
+
+    ```bash
+    podman pod inspect mypod
+    ```
+  </Accordion>
+
+  <Accordion title="podman pod logs">
+    Display combined logs for all containers in a pod.
+
+    ```bash
+    podman pod logs mypod
+    podman pod logs --follow mypod
+    ```
+  </Accordion>
+
+  <Accordion title="podman pod rm">
+    Remove a stopped pod and all of its containers. Use `-f` to force-remove a running pod.
+
+    ```bash
+    podman pod rm mypod
+    ```
+  </Accordion>
+</AccordionGroup>

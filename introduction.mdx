@@ -1,0 +1,109 @@
+---
+title: "Introduction to Podman: Daemonless Container Engine"
+description: "Podman is a daemonless, rootless OCI container engine with a Docker-compatible CLI for managing containers, pods, images, and volumes on any platform."
+---
+
+Podman (the POD MANager) is an open-source container engine that lets you build, run, and manage OCI containers and pods without a background daemon. Unlike Docker, every `podman` command runs as a direct child process — there is no single long-running daemon to maintain or secure. Podman supports both OCI and Docker image formats, runs containers as a non-root user by default, and exposes a Docker-compatible CLI so most workflows migrate without changes.
+
+## Key features
+
+<CardGroup cols={2}>
+  <Card title="Daemonless architecture" icon="circle-nodes">
+    Podman runs each command directly as a child process with no persistent background daemon, reducing your attack surface and eliminating idle resource usage.
+  </Card>
+  <Card title="Rootless containers" icon="shield-halved" href="/advanced/rootless">
+    Run containers as a normal user without elevated privileges. Rootless containers use user namespaces so the container root maps to your user on the host.
+  </Card>
+  <Card title="Docker-compatible CLI" icon="terminal">
+    Podman's CLI mirrors Docker's interface. Most users can run `alias docker=podman` and continue working. Docker Compose workflows are supported via `podman compose`.
+  </Card>
+  <Card title="Native pod management" icon="layer-group" href="/guides/pods">
+    Group containers into pods that share networking and storage — the same abstraction used by Kubernetes — managed directly from the CLI.
+  </Card>
+  <Card title="Quadlet and systemd" icon="gear" href="/advanced/quadlet-systemd">
+    Declare containers and pods as systemd unit files using Quadlet. Podman generates and manages the units, giving containers first-class systemd integration.
+  </Card>
+  <Card title="REST API" icon="code">
+    Podman exposes both a Docker-compatible REST API and a Podman-native API with extended functionality. Go applications can integrate directly using the `pkg/bindings` library.
+  </Card>
+</CardGroup>
+
+## Architecture overview
+
+Podman is built on a set of focused OCI libraries rather than a monolithic daemon. Understanding how these fit together helps when troubleshooting or extending Podman.
+
+| Component | Role |
+|---|---|
+| **libpod** | Core container and pod lifecycle management library embedded in Podman |
+| **containers/image** | Pulls, pushes, and inspects OCI and Docker images from any registry |
+| **containers/storage** | Manages layered storage for container images and writable container layers |
+| **Buildah** | Powers `podman build`; builds OCI images from Containerfiles without a daemon |
+| **Netavark** | Network management for containers; handles bridge networking and DNS via Aardvark |
+| **crun / runc** | OCI-compliant container runtimes that execute container processes |
+| **Conmon** | Per-container monitor that relays stdio and detects container exit |
+| **pasta** | Rootless networking via user-mode networking for unprivileged containers |
+
+Because Podman uses the same image and storage libraries as Buildah and CRI-O, images built or pulled by one tool are visible to the others.
+
+### Daemonless model
+
+When you run a Podman command, Podman forks a container process directly — it does not connect to a daemon. The process tree looks like:
+
+```
+your shell
+  └─ podman run ...
+       └─ conmon (monitor)
+            └─ crun (OCI runtime)
+                 └─ container process
+```
+
+This means there is no single point of failure, no daemon restart to worry about, and no privileged socket that all container operations must pass through.
+
+### Remote and cross-platform usage
+
+The core Podman runtime requires a Linux kernel. On macOS and Windows, Podman manages a lightweight Linux virtual machine using the `podman machine` command, backed by either Apple Virtualization Framework (macOS) or WSLv2/Hyper-V (Windows). The `podman` CLI on your host communicates with the guest via SSH and behaves identically to the Linux CLI.
+
+<Note>
+  Podman Desktop provides a full-featured graphical interface for Podman on Linux, macOS, and Windows. It wraps the same `podman machine` backend and supports container lifecycle management, image handling, and Kubernetes YAML. See [podman-desktop.io](https://podman-desktop.io) for details.
+</Note>
+
+## Rootless containers
+
+Podman can run as a normal user without a setuid binary or elevated privileges. When run rootless, containers use Linux user namespaces to map the container's root user to your host user. Rootless containers can never acquire more privileges than the user who launched them — even with `--privileged`, the effective capabilities are bounded by your user's own capabilities.
+
+```bash
+# Run a container as your regular user — no sudo required
+podman run -it docker.io/library/alpine sh
+```
+
+<Tip>
+  Any recent Podman release supports rootless mode without additional configuration on most distributions. See the [rootless guide](/advanced/rootless) for setup steps required on some systems (subuid/subgid mapping, cgroup v2).
+</Tip>
+
+## OCI project integrations
+
+Podman participates in the broader OCI ecosystem and integrates with several complementary tools:
+
+- **[Buildah](https://github.com/containers/buildah)** — low-level image builder; `podman build` uses Buildah's Go API
+- **[Skopeo](https://github.com/containers/skopeo)** — specialized image copying and signing across registries
+- **[CRI-O](https://github.com/cri-o/cri-o)** — Kubernetes CRI runtime that shares the same image and storage libraries
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Install Podman" icon="download" href="/installation">
+    Install Podman on Linux, macOS, or Windows.
+  </Card>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Pull an image and run your first container in minutes.
+  </Card>
+  <Card title="Working with containers" icon="box" href="/guides/containers">
+    Learn to create, inspect, and manage containers day-to-day.
+  </Card>
+  <Card title="Rootless guide" icon="shield" href="/advanced/rootless">
+    Configure and understand rootless container execution.
+  </Card>
+  <Card title="Quadlet and systemd" icon="gear" href="/advanced/quadlet-systemd">
+    Manage containers declaratively with systemd unit files.
+  </Card>
+</CardGroup>

@@ -1,0 +1,143 @@
+---
+title: "Configuring container registries with registries.conf"
+description: "Configure unqualified image search registries, insecure registries, blocked registries, and short-name aliases using the registries.conf file."
+---
+
+`registries.conf` is a TOML configuration file that tells Podman which registries to search when you pull an image without a fully qualified name, how to handle registries that do not use TLS, which registries are blocked entirely, and how short names map to full image references.
+
+## File locations
+
+Podman reads registry configuration from the following locations in order. Settings in later files take precedence:
+
+1. `/etc/containers/registries.conf` — system-wide configuration
+2. `/etc/containers/registries.conf.d/*.conf` — drop-in files for system-wide overrides
+3. `$XDG_CONFIG_HOME/containers/registries.conf` or `~/.config/containers/registries.conf` — per-user overrides
+
+The system-wide file is typically installed by the `containers-common` package on your distribution.
+
+## Unqualified-search registries
+
+When you run `podman pull alpine` (no registry prefix), Podman searches the registries listed in `unqualified-search-registries` in order until it finds the image.
+
+```toml
+unqualified-search-registries = ["registry.fedoraproject.org", "quay.io", "docker.io"]
+```
+
+<Warning>
+If `unqualified-search-registries` is missing or empty, pulling short image names will fail with an error like `no such image "alpine" in registry: image not known`.
+</Warning>
+
+## Registry blocks
+
+Use a `[[registry]]` entry with `blocked = true` to prevent pulling from a registry entirely:
+
+```toml
+[[registry]]
+location = "untrusted.example.com"
+blocked = true
+```
+
+## Insecure registries
+
+By default Podman enforces TLS when communicating with registries. To allow a registry that serves plain HTTP or uses a self-signed certificate, set `insecure = true`:
+
+```toml
+[[registry]]
+location = "localhost:5000"
+insecure = true
+```
+
+You can also create a drop-in file for a single registry:
+
+```bash
+# /etc/containers/registries.conf.d/registry-local.conf
+[[registry]]
+location = "registry.internal.example.com"
+insecure = true
+```
+
+<Warning>
+Communicating with a registry over plain HTTP exposes image pulls to interception. Only use `insecure = true` on trusted internal networks.
+</Warning>
+
+## Registry mirrors
+
+Redirect pulls from one registry to a mirror using `prefix` and `location`:
+
+```toml
+[[registry]]
+prefix = "docker.io"
+location = "mirror.gcr.io"
+
+[[registry]]
+prefix = "docker.io/library"
+location = "quay.io/libpod"
+```
+
+When Podman resolves an image prefixed with `docker.io/library/`, it tries the more-specific `quay.io/libpod` mirror first.
+
+## Short-name aliases
+
+Short-name aliases map a convenient short name directly to a fully qualified image reference. This avoids the search loop through `unqualified-search-registries`:
+
+```toml
+[aliases]
+  "ubi8" = "registry.access.redhat.com/ubi8/ubi"
+  "fedora" = "registry.fedoraproject.org/fedora"
+```
+
+With these aliases configured, `podman pull ubi8` resolves directly to `registry.access.redhat.com/ubi8/ubi` without searching other registries.
+
+<Tip>
+Short-name aliases are the safest way to resolve short image names because they bypass the ordered search and prevent name squatting attacks.
+</Tip>
+
+## Complete example
+
+The following `registries.conf` is typical for a development environment:
+
+```toml
+# Search these registries in order when a short image name is used
+unqualified-search-registries = ["docker.io", "quay.io", "registry.fedoraproject.org"]
+
+# Mirror all docker.io pulls through a caching proxy
+[[registry]]
+prefix = "docker.io"
+location = "mirror.gcr.io"
+
+# Also mirror docker.io/library images via quay.io/libpod
+[[registry]]
+prefix = "docker.io/library"
+location = "quay.io/libpod"
+
+# Allow a local insecure registry used for development
+[[registry]]
+location = "localhost:5000"
+insecure = true
+
+# Block a known untrusted registry
+[[registry]]
+location = "untrusted.example.com"
+blocked = true
+
+# Short-name aliases
+[aliases]
+  "ubi9" = "registry.access.redhat.com/ubi9/ubi"
+```
+
+## Applying changes
+
+No daemon restart is required. Podman re-reads `registries.conf` on every invocation. Verify the active configuration with:
+
+```bash
+podman info --format '{{.Registries}}'
+```
+
+## Podman machine note
+
+On macOS and Windows, `registries.conf` changes must be made inside the Podman virtual machine, not on the host:
+
+```bash
+podman machine ssh
+sudo vi /etc/containers/registries.conf
+```

@@ -1,0 +1,290 @@
+---
+title: "Managing Containers with Podman Quadlet and systemd"
+description: "Use Podman Quadlet to declare containers, pods, volumes, and networks as systemd unit files, then manage them with systemctl like any other service."
+---
+
+Quadlet is a systemd unit file generator built into Podman. Instead of writing `podman run` commands in shell scripts, you declare containers, volumes, networks, and pods in simple INI-style files. During boot — and whenever you run `systemctl daemon-reload` — Podman's generator reads those files and produces regular systemd `.service` units. You can then start, stop, and monitor your containers with standard `systemctl` commands.
+
+## How Quadlet works
+
+The Podman generator (`podman-system-generator`) scans the unit search paths for files with the extensions `.container`, `.volume`, `.network`, `.pod`, `.kube`, `.build`, `.image`, and `.artifact`. For each file it finds, it generates a corresponding `.service` file and registers it with systemd. No daemon is required — the generator runs as part of the systemd generator protocol during `daemon-reload`.
+
+Each Quadlet file uses the same INI format as standard systemd unit files. Custom sections (`[Container]`, `[Volume]`, etc.) are processed by Podman; all other sections (`[Unit]`, `[Service]`, `[Install]`) pass through to systemd unchanged.
+
+<Note>
+  Quadlet requires cgroups v2. Check your system with:
+  ```bash
+  podman info --format '{{.Host.CgroupsVersion}}'
+  ```
+</Note>
+
+## Unit file search paths
+
+Quadlet reads files from different locations depending on whether you are running as root or as a regular user.
+
+<Tabs>
+  <Tab title="Rootless (user)">
+    Place your unit files in one of these directories (listed from highest to lowest precedence):
+
+    ```text
+    $XDG_RUNTIME_DIR/containers/systemd/
+    ~/.config/containers/systemd/
+    /etc/containers/systemd/users/${UID}/
+    /etc/containers/systemd/users/
+    /usr/share/containers/systemd/users/${UID}/
+    /usr/share/containers/systemd/users/
+    ```
+
+    The most common location for personal container units is:
+
+    ```text
+    ~/.config/containers/systemd/
+    ```
+
+    Units placed under `/etc/containers/systemd/users/` apply to all users; units in a `${UID}` subdirectory apply only to the user with that UID.
+  </Tab>
+  <Tab title="Root (system)">
+    Root unit files are read from these directories (highest to lowest precedence):
+
+    ```text
+    /run/containers/systemd/       # temporary, for testing
+    /etc/containers/systemd/       # system administrator definitions
+    /usr/share/containers/systemd/ # distribution-provided defaults
+    ```
+  </Tab>
+</Tabs>
+
+## Unit file types
+
+<AccordionGroup>
+  <Accordion title=".container — run a container as a service">
+    Container units are the most common Quadlet type. They generate a service that runs `podman run`. The only required key is `Image`.
+
+    By default, the resulting Podman container is named `systemd-<unitname>` and the systemd service is named `<unitname>.service`.
+
+    Example `test.container`:
+
+    ```ini
+    [Unit]
+    Description=A minimal container
+
+    [Container]
+    # Use the centos image
+    Image=quay.io/centos/centos:latest
+
+    # Mount a volume and attach a network defined as Quadlet units
+    Volume=test.volume:/data
+    Network=test.network
+
+    # Run sleep inside the container
+    Exec=sleep 60
+
+    [Service]
+    # Restart service when sleep finishes
+    Restart=always
+    # Extend timeout to allow time to pull the image
+    TimeoutStartSec=900
+
+    [Install]
+    # Start by default on boot
+    WantedBy=multi-user.target default.target
+    ```
+
+    Key `[Container]` options map directly to `podman run` flags:
+
+    | Key | `podman run` equivalent |
+    |-----|------------------------|
+    | `Image=` | image name argument |
+    | `Exec=` | command after image |
+    | `PublishPort=8080:80` | `--publish 8080:80` |
+    | `Volume=/src:/dst` | `--volume /src:/dst` |
+    | `Network=name` | `--network name` |
+    | `Environment=foo=bar` | `--env foo=bar` |
+    | `User=bin` | `--user bin` |
+    | `AddCapability=CAP` | `--cap-add CAP` |
+    | `ReadOnly=true` | `--read-only` |
+    | `Secret=secret` | `--secret=secret` |
+  </Accordion>
+
+  <Accordion title=".pod — group containers into a pod">
+    Pod units generate a `podman pod create` command. Containers join the pod by setting `Pod=<podname>.pod` in their `.container` unit.
+
+    Example `test.pod`:
+
+    ```ini
+    [Pod]
+    PodName=test
+    ```
+
+    Example `centos.container` in that pod:
+
+    ```ini
+    [Container]
+    Image=quay.io/centos/centos:latest
+    Exec=sh -c "sleep inf"
+    Pod=test.pod
+    ```
+
+    For a pod with a one-shot startup task, use `ExitPolicy=continue` to keep the pod running after that container exits:
+
+    ```ini
+    [Pod]
+    PodName=test
+    ExitPolicy=continue
+    ```
+
+    The generated pod service defaults to `Restart=on-failure`. To restart the pod automatically when containers exit, set `Restart=always` in the `[Service]` section of the `.pod` file.
+  </Accordion>
+
+  <Accordion title=".volume — pre-create a named volume">
+    Volume units generate a one-time `podman volume create` command that ensures the volume exists before any container that depends on it starts. The volume is named `systemd-<unitname>` by default.
+
+    Example `test.volume`:
+
+    ```ini
+    [Volume]
+    User=root
+    Group=root
+    Label=org.test.Key=value
+    ```
+
+    Containers reference this volume as `test.volume` in their `Volume=` key:
+
+    ```ini
+    Volume=test.volume:/data
+    ```
+
+    Quadlet automatically adds a systemd dependency so the container service waits for the volume service to complete.
+  </Accordion>
+
+  <Accordion title=".network — pre-create a named network">
+    Network units generate a one-time `podman network create` command. The network is named `systemd-<unitname>` by default.
+
+    Example `test.network`:
+
+    ```ini
+    [Network]
+    Subnet=172.16.0.0/24
+    Gateway=172.16.0.1
+    IPRange=172.16.0.0/28
+    Label=org.test.Key=value
+    ```
+
+    Reference this network in a container unit:
+
+    ```ini
+    Network=test.network
+    ```
+
+    Quadlet resolves the network name and adds the appropriate service dependency automatically.
+  </Accordion>
+</AccordionGroup>
+
+## Enabling units to start on boot
+
+Quadlet-generated services are considered transient by systemd, so `systemctl enable` does not work in the usual way. Instead, add an `[Install]` section to the Quadlet file itself. The generator applies it during generation, equivalent to what `systemctl enable` would do:
+
+```ini
+[Install]
+WantedBy=default.target
+```
+
+For system-wide units, use `multi-user.target`:
+
+```ini
+[Install]
+WantedBy=multi-user.target default.target
+```
+
+Currently supported `[Install]` keys are: `Alias`, `WantedBy`, `RequiredBy`, and `UpheldBy`.
+
+## Applying changes
+
+After adding or modifying a Quadlet unit file, reload systemd to regenerate the service files:
+
+<Tabs>
+  <Tab title="Rootless">
+    ```bash
+    systemctl --user daemon-reload
+    systemctl --user start test.service
+    ```
+  </Tab>
+  <Tab title="Root">
+    ```bash
+    sudo systemctl daemon-reload
+    sudo systemctl start test.service
+    ```
+  </Tab>
+</Tabs>
+
+## Managing services with systemctl
+
+Once the generator has run, your containers appear as ordinary systemd services:
+
+```bash
+# Start a container service
+systemctl --user start test.service
+
+# Check status
+systemctl --user status test.service
+
+# View logs
+journalctl --user -u test.service
+
+# Stop the container
+systemctl --user stop test.service
+
+# List all unit files (including generated ones)
+systemctl --user list-unit-files
+```
+
+## Startup timeout
+
+When a Quadlet unit starts, Podman may need to pull a container image, which can take longer than systemd's default 90-second timeout. To extend it, add a `[Service]` section to your unit file:
+
+```ini
+[Service]
+TimeoutStartSec=900
+```
+
+<Tip>
+  Pre-pull images with `podman pull` before enabling a unit to avoid startup timeout issues.
+</Tip>
+
+## Debugging generated unit files
+
+If a service fails with `Unit example.service not found`, the generator may have encountered a syntax error. View the generated files and errors with:
+
+```bash
+/usr/lib/systemd/system-generators/podman-system-generator --user --dryrun
+```
+
+To debug a specific set of unit files without running the full generator:
+
+```bash
+QUADLET_UNIT_DIRS=/path/to/my/units \
+  /usr/lib/systemd/system-generators/podman-system-generator --user --dryrun
+```
+
+You can also verify the generated service with:
+
+```bash
+systemd-analyze --user --generators=true verify example.service
+```
+
+## Dependencies between Quadlet units
+
+Quadlet automatically resolves dependencies between its own unit types. When a `.container` file references `Volume=test.volume:/data`, Quadlet finds `test.volume`, resolves the volume name, and adds the appropriate `Requires=` and `After=` entries to the generated service.
+
+You can also declare explicit ordering between containers in the `[Unit]` section:
+
+```ini
+[Unit]
+After=basic.container
+Requires=basic.container
+
+[Container]
+Image=registry.fedoraproject.org/fedora:41
+```
+
+Quadlet translates these `.container` references into the correct `.service` names automatically.

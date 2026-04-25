@@ -1,0 +1,219 @@
+---
+title: "Podman machine: Linux VM backend for macOS and Windows"
+description: "Initialize, start, stop, SSH into, and manage Podman virtual machines on macOS and Windows. Covers rootful mode, mounts, and OS update procedures."
+---
+
+Containers are a Linux technology — their core isolation primitives are tied to the Linux kernel. On macOS and Windows, Podman runs a lightweight Linux virtual machine (VM) in the background so that you can issue the same `podman` commands you would on a Linux host. The `podman machine` subcommands manage the full lifecycle of that VM.
+
+<Note>
+All `podman machine` commands are rootless only. The machine configuration is stored under `$XDG_CONFIG_HOME/containers/podman/machine/`.
+</Note>
+
+## Supported VM providers by platform
+
+| Platform | Provider | Default |
+|----------|----------|---------|
+| Linux | qemu | ✅ |
+| macOS | libkrun | ✅ |
+| macOS | applehv | |
+| Windows | wsl | ✅ |
+| Windows | hyperv | |
+
+## Initializing a machine
+
+`podman machine init` downloads a VM image and configures the machine. The default machine name is `podman-machine-default`.
+
+```bash
+podman machine init
+```
+
+You can customize resources at init time:
+
+```bash
+podman machine init \
+  --cpus 4 \
+  --memory 4096 \
+  --disk-size 50 \
+  --now
+```
+
+The `--now` flag starts the machine immediately after initialization.
+
+### Key init options
+
+| Flag | Description |
+|------|-------------|
+| `--cpus` | Number of vCPUs to allocate |
+| `--memory`, `-m` | Memory in MiB (1024 MiB = 1 GiB) |
+| `--disk-size` | Disk size in GiB |
+| `--rootful` | Prefer rootful container execution inside the VM |
+| `--now` | Start the VM immediately after init |
+| `--timezone` | Set timezone (`local` or an IANA zone such as `America/Chicago`) |
+| `--volume`, `-v` | Mount a host directory into the VM (`source:target[:options]`) |
+| `--image` | Use a custom VM image (registry, file path, or URL) |
+| `--provider` | Override the default VM provider for the platform |
+
+### Mounting host directories
+
+```bash
+podman machine init --volume "$HOME/projects:$HOME/projects:ro"
+```
+
+The default volume mount is `$HOME:$HOME` unless overridden in `containers.conf`.
+
+<Warning>
+The following destination paths are forbidden for volume mounts: `/bin`, `/boot`, `/dev`, `/etc`, `/home`, `/proc`, `/root`, `/run`, `/sbin`, `/sys`, `/tmp`, `/usr`, and `/var`. Subdirectories of those paths are allowed with care.
+</Warning>
+
+## Starting and stopping
+
+```bash
+# Start the default machine
+podman machine start
+
+# Start a named machine
+podman machine start my-machine
+
+# Stop the default machine
+podman machine stop
+
+# Stop a named machine
+podman machine stop my-machine
+```
+
+## Listing machines
+
+```bash
+podman machine list
+```
+
+Sample output:
+
+```text
+NAME                    VM TYPE     CREATED      LAST UP            CPUS        MEMORY      DISK SIZE
+podman-machine-default  applehv     2 weeks ago  Currently running  1           2GiB        100GiB
+```
+
+## Removing a machine
+
+```bash
+podman machine rm podman-machine-default
+```
+
+Add `--force` to skip the confirmation prompt and remove a running machine.
+
+## SSH into a machine
+
+Open an interactive shell:
+
+```bash
+podman machine ssh
+```
+
+Run a single command inside the VM:
+
+```bash
+podman machine ssh 'sudo rpm-ostree upgrade --check'
+```
+
+## Inspecting a machine
+
+```bash
+podman machine inspect
+```
+
+To inspect a specific machine:
+
+```bash
+podman machine inspect my-machine
+```
+
+The output is JSON and includes the machine's VM type, CPU count, memory, disk path, running state, and connection URIs.
+
+## Updating the machine OS
+
+<Tabs>
+  <Tab title="FCOS (macOS / Linux)">
+    Check for available OS updates:
+
+    ```bash
+    podman machine ssh 'sudo rpm-ostree upgrade --check'
+    ```
+
+    Apply the update:
+
+    ```bash
+    podman machine ssh 'sudo rpm-ostree upgrade'
+    podman machine stop && podman machine start
+    ```
+
+    This mechanism updates patch (Z) versions. For major/minor (X.Y) updates use `podman machine os apply`.
+  </Tab>
+  <Tab title="WSL (Windows)">
+    Update packages inside the running machine:
+
+    ```bash
+    podman machine ssh dnf update
+    ```
+  </Tab>
+</Tabs>
+
+<Note>
+After a patch update the host and VM versions of Podman may briefly diverge. Run `podman info` to compare both versions. Mismatched versions are unsupported.
+</Note>
+
+## Rootful vs rootless machine modes
+
+By default a Podman machine runs containers in **rootless** mode, which means containers run as the unprivileged user inside the VM. This is the safest option for most workloads.
+
+Some use cases require **rootful** mode — for example, when running containers that need full root privileges inside the VM or when using certain network features.
+
+<Tabs>
+  <Tab title="Set rootful at init">
+    ```bash
+    podman machine init --rootful
+    ```
+  </Tab>
+  <Tab title="Switch an existing machine">
+    ```bash
+    podman machine set --rootful
+    ```
+
+    Stop and restart the machine for the change to take effect:
+
+    ```bash
+    podman machine stop && podman machine start
+    ```
+  </Tab>
+</Tabs>
+
+<Warning>
+Rootful mode gives containers elevated privileges inside the VM. Only use it when required for your workload.
+</Warning>
+
+## Setting the default machine
+
+When you have multiple machines, specify which one `podman` connects to by default:
+
+```bash
+podman system connection default podman-machine-default
+```
+
+List all available connections:
+
+```bash
+podman system connection list
+```
+
+## Machine configuration defaults
+
+Default machine resource settings (CPU count, memory, disk size, and volume mounts) can be set in the `[machine]` section of `containers.conf`:
+
+```toml
+[machine]
+cpus = 2
+memory = 2048
+disk_size = 100
+```
+
+See [Containers.conf configuration](/configuration/containers-conf) for the full reference.

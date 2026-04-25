@@ -1,0 +1,112 @@
+---
+title: "podman exec — Execute a command in a running container"
+description: "Run an additional process inside an already-running Podman container, optionally with an interactive terminal, different user, or custom working directory."
+---
+
+`podman exec` runs a new process inside a container that is already running. It is commonly used to open an interactive shell for debugging, run administrative one-off tasks, or inspect the container's live filesystem without stopping the workload. The container must be in a running state; `podman exec` cannot start a stopped container.
+
+## Synopsis
+
+```bash
+podman exec [options] CONTAINER COMMAND [ARG...]
+podman container exec [options] CONTAINER COMMAND [ARG...]
+```
+
+## Description
+
+`podman exec` attaches a new process to an existing container's namespaces — including its network, mount, and PID namespaces — so the executed command sees the same environment as the container's primary process. The exec session can be interactive or non-interactive, and it can run as a different user than the container's primary process.
+
+<Tip>
+Use `podman exec -it CONTAINER /bin/bash` (or `/bin/sh` for minimal images) as a quick way to get a shell inside a running container for live debugging.
+</Tip>
+
+## Key flags
+
+<ParamField path="--interactive, -i" type="boolean" default="false">
+  Keep stdin open and pass it to the executed command. Required when running interactive commands or piping input into the exec session.
+</ParamField>
+
+<ParamField path="--tty, -t" type="boolean" default="false">
+  Allocate a pseudo-TTY for the exec session. Combine with `--interactive` (`-it`) to get a full interactive terminal. Avoid `-t` when piping data, as it merges stdout and stderr.
+</ParamField>
+
+<ParamField path="--detach, -d" type="boolean" default="false">
+  Start the exec session but do not attach to it. The command runs in the background and the exec session is automatically removed when it completes. Podman prints the exec session ID and exits immediately.
+</ParamField>
+
+<ParamField path="--user, -u" type="string">
+  Run the command as the specified user or UID, with an optional group or GID. Format: `user[:group]`. Defaults to the user defined by the container image. Both symbolic names and numeric IDs are accepted.
+</ParamField>
+
+<ParamField path="--workdir, -w" type="string">
+  Set the working directory for the executed command. Must be an absolute path. If not specified, defaults to the container image's configured working directory.
+</ParamField>
+
+<ParamField path="--env, -e" type="string">
+  Set additional environment variables for the executed command. Can be specified multiple times. Variables set here do not affect the container's primary process.
+</ParamField>
+
+<ParamField path="--privileged" type="boolean" default="false">
+  Give the exec session elevated privileges, similar to `podman run --privileged`. This disables security constraints for the executed process only, not for the rest of the container.
+
+  <Warning>
+    Privileged exec sessions disable SELinux, seccomp, and capability restrictions for that process. Use only when required for maintenance tasks.
+  </Warning>
+</ParamField>
+
+<ParamField path="--cidfile" type="string">
+  Read the container ID from the specified file instead of providing it directly on the command line. Useful in scripted workflows where the container ID was written by `podman run --cidfile`.
+</ParamField>
+
+## Examples
+
+### Open an interactive shell
+
+```bash
+podman exec -it mycontainer /bin/bash
+```
+
+For minimal images that do not ship bash:
+
+```bash
+podman exec -it mycontainer /bin/sh
+```
+
+### Run a command as a specific user
+
+```bash
+podman exec --user root mycontainer whoami
+```
+
+### Run with a custom working directory
+
+```bash
+podman exec -it -w /tmp mycontainer pwd
+```
+
+### Inspect an environment variable inside the container
+
+```bash
+podman exec mycontainer printenv DATABASE_URL
+```
+
+### Run a background task without attaching
+
+```bash
+podman exec -d mycontainer find /var/log -name "*.log" -mtime +7 -delete
+```
+
+### Pass environment variables to the exec session
+
+```bash
+podman exec -e DEBUG=true -it mycontainer ./run-debug.sh
+```
+
+## Exit status
+
+| Code | Meaning |
+|------|---------|
+| `125` | Error in Podman itself (e.g., unknown flag) |
+| `126` | Command found but not executable |
+| `127` | Command not found in `$PATH` |
+| _N_ | Exit code of the executed command |

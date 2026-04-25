@@ -1,0 +1,205 @@
+---
+title: "podman run — Create and run a command in a new container"
+description: "Create and start a new container from an image with full control over networking, storage, resource limits, environment variables, and process isolation."
+---
+
+`podman run` is the primary way to create and start containers with Podman. It combines container creation and startup into a single step, giving you complete control over the container's runtime environment — from networking and port bindings to CPU limits, volume mounts, and security settings. If the specified image is not already present locally, Podman automatically pulls it from the configured registry before starting the container.
+
+## Synopsis
+
+```bash
+podman run [options] IMAGE [COMMAND [ARG...]]
+podman container run [options] IMAGE [COMMAND [ARG...]]
+```
+
+## Description
+
+`podman run` starts a process in a new container with its own file system, networking stack, and isolated process tree. The image defines defaults for the process, but the operator has final control over all runtime settings. Several files are automatically created inside the container (`/etc/hosts`, `/etc/hostname`, `/etc/resolv.conf`) based on host equivalents, and a container environment marker file is written to `/run/.containerenv`.
+
+Default settings are read from `containers.conf`. For remote Podman connections (Mac, Windows), `docker://` is the only supported image transport.
+
+<Note>
+When `--rm` is not set, stopped containers persist on disk. Run `podman rm` to clean them up, or use `podman run --rm` for ephemeral containers.
+</Note>
+
+## Key flags
+
+<ParamField path="--name" type="string">
+  Assign a human-readable name to the container. Podman generates a random name if this is omitted. The name can be used in place of the container ID in most commands, and is also added to `/etc/hosts` inside the container.
+</ParamField>
+
+<ParamField path="--detach, -d" type="boolean" default="false">
+  Run the container in the background and print the new container ID. The container continues running after the command returns. Use `podman attach` or `podman exec` to reconnect. Detach from an attached session with `Ctrl-p, Ctrl-q`.
+</ParamField>
+
+<ParamField path="--interactive, -i" type="boolean" default="false">
+  Keep stdin open and available to the container process. Required when you need to pipe input or run interactive programs. Combine with `--tty` for a full interactive shell session.
+</ParamField>
+
+<ParamField path="--tty, -t" type="boolean" default="false">
+  Allocate a pseudo-TTY and attach it to the container's stdin. Use together with `--interactive` (`-it`) to get a fully interactive terminal session. Do not use `-t` when piping data into the container, as it combines stdout and stderr and may corrupt binary output.
+</ParamField>
+
+<ParamField path="--publish, -p" type="string">
+  Publish a container port (or port range) to the host. Format: `[[ip:][hostPort]:]containerPort[/protocol]`. Omit `hostPort` to let Podman assign a random host port. Use `podman port` to inspect the actual mapping. Supports `tcp`, `udp`, and (for rootful containers) `sctp`.
+
+  ```
+  -p 8080:80          # host port 8080 → container port 80
+  -p 127.0.0.1:443:443
+  -p 2000-2010:2000-2010/udp
+  ```
+</ParamField>
+
+<ParamField path="--env, -e" type="string">
+  Set an environment variable inside the container. Can be specified multiple times. If only a variable name is provided (no `=value`), Podman reads the value from the host environment. Names ending in `*` cause Podman to forward all matching host variables.
+
+  ```
+  -e DATABASE_URL=postgres://localhost/mydb
+  -e HOME        # forwards host value
+  -e AWS_*       # forwards all AWS_ prefixed vars
+  ```
+</ParamField>
+
+<ParamField path="--volume, -v" type="string">
+  Mount a host directory or named volume into the container. Format: `[[SOURCE:]CONTAINER-DIR[:OPTIONS]]`. Options include `ro`/`rw`, `z`/`Z` (SELinux relabeling), `U` (chown to container user), `O` (overlay), and mount propagation flags (`shared`, `slave`, `private`). Named volumes are created automatically if they do not exist.
+
+  ```
+  -v /host/data:/data           # bind mount
+  -v myvolume:/data             # named volume
+  -v /host/cfg:/etc/app:ro,Z    # read-only with SELinux label
+  ```
+</ParamField>
+
+<ParamField path="--rm" type="boolean" default="false">
+  Automatically remove the container and any anonymous volumes when it exits. Useful for one-off commands and CI workloads where you do not want to accumulate stopped containers.
+</ParamField>
+
+<ParamField path="--network, --net" type="string">
+  Set the network mode for the container. Common values:
+  - `bridge` — default for rootful containers; creates an isolated bridge network
+  - `host` — share the host's network namespace (no isolation)
+  - `none` — no network interfaces configured
+  - `pasta` — default for rootless containers; user-mode networking
+  - `container:ID` — reuse another container's network stack
+  - A named network created with `podman network create`
+</ParamField>
+
+<ParamField path="--user, -u" type="string">
+  Set the username or UID (and optionally group/GID) for the container process. Format: `user[:group]`. Both symbolic names and numeric IDs are accepted. Defaults to the user defined in the image, which is typically root.
+</ParamField>
+
+<ParamField path="--privileged" type="boolean" default="false">
+  Give the container elevated privileges equivalent to those of the user launching it. This disables seccomp filters, Apparmor/SELinux confinement, capability dropping, and read-only device restrictions. Rootless containers cannot exceed the privileges of the invoking user.
+
+  <Warning>
+    Privileged containers can break out of normal container isolation. Use only when strictly necessary and never in production workloads unless the threat model explicitly allows it.
+  </Warning>
+</ParamField>
+
+<ParamField path="--restart" type="string" default="no">
+  Restart policy applied when the container exits. Valid values:
+  - `no` / `never` — do not restart
+  - `on-failure[:N]` — restart on non-zero exit, up to N times
+  - `always` — always restart, including after system reboot
+  - `unless-stopped` — restart unless the user explicitly stopped the container
+
+  <Note>
+    In systemd unit files, use the native `Restart=` directive instead of this flag. See `podman-systemd.unit(5)`.
+  </Note>
+</ParamField>
+
+<ParamField path="--cpus" type="float" default="0.0 (unlimited)">
+  Limit the number of CPU cores available to the container. A value of `0.5` allows up to half a CPU. This is shorthand for `--cpu-period` / `--cpu-quota` and cannot be combined with those flags. Not supported on cgroups v1 rootless systems.
+</ParamField>
+
+<ParamField path="--memory, -m" type="string" default="unlimited">
+  Set a memory limit. Units: `b` (bytes), `k` (kibibytes), `m` (mebibytes), `g` (gibibytes). Example: `--memory 512m`. A value of `0` means no limit. Not supported on cgroups v1 rootless systems.
+</ParamField>
+
+## Examples
+
+### Interactive shell
+
+Start an interactive bash session inside a Fedora container, then discard the container on exit:
+
+```bash
+podman run -it --rm fedora /bin/bash
+```
+
+### Detached background service
+
+Run an nginx web server in the background, name it, and map port 8080 on the host to port 80 in the container:
+
+```bash
+podman run -d --name webserver -p 8080:80 nginx
+```
+
+### Environment variables and named volume
+
+Run a PostgreSQL database with credentials passed via environment variables and data persisted to a named volume:
+
+```bash
+podman run -d \
+  --name postgres \
+  -e POSTGRES_USER=admin \
+  -e POSTGRES_PASSWORD=secret \
+  -e POSTGRES_DB=myapp \
+  -v pgdata:/var/lib/postgresql/data \
+  -p 5432:5432 \
+  postgres:16
+```
+
+### Bind-mount source code and override the command
+
+Mount the current directory into the container for a build:
+
+```bash
+podman run --rm \
+  -v "$(pwd)":/workspace:Z \
+  -w /workspace \
+  golang:1.22 \
+  go build ./...
+```
+
+### Resource-limited container
+
+Run a container with a 512 MiB memory cap and at most 1 CPU:
+
+```bash
+podman run -d \
+  --name app \
+  --memory 512m \
+  --cpus 1 \
+  myapp:latest
+```
+
+### Non-root user with restart policy
+
+Run a container as a specific user, restarting it automatically unless explicitly stopped:
+
+```bash
+podman run -d \
+  --name service \
+  --user 1001:1001 \
+  --restart unless-stopped \
+  myservice:latest
+```
+
+### Read-only container filesystem
+
+Prevent any writes to the container image layer. The container can still write to explicitly mounted volumes:
+
+```bash
+podman run --read-only \
+  -v /tmp/app-tmp:/tmp \
+  myapp:latest
+```
+
+## Exit status
+
+| Code | Meaning |
+|------|---------|
+| `125` | Error in Podman itself (e.g., unknown flag) |
+| `126` | Container command found but not executable |
+| `127` | Container command not found in `$PATH` |
+| _N_ | Exit code of the command that ran inside the container |

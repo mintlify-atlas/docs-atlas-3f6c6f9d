@@ -1,0 +1,177 @@
+---
+title: "podman manifest — Build multi-architecture image lists"
+description: "Reference for podman manifest subcommands. Build OCI image indexes and Docker manifest lists for distributing images across multiple CPU architectures."
+---
+
+A manifest list (Docker) or image index (OCI) is a top-level image reference that points to multiple platform-specific images. When a user pulls a manifest list, the container runtime automatically selects the image that matches their platform — for example, `linux/amd64` on an Intel server, or `linux/arm64` on Apple Silicon. The `podman manifest` commands let you create, populate, annotate, and push these multi-architecture image indexes without leaving Podman.
+
+## Subcommands
+
+| Subcommand | Description |
+|---|---|
+| `add` | Add an image or artifact to a manifest list. |
+| `annotate` | Add or update platform metadata on a manifest entry. |
+| `create` | Create a new empty manifest list or image index. |
+| `exists` | Check if a manifest list exists in local storage. |
+| `inspect` | Display the content of a manifest list or image index. |
+| `push` | Push a manifest list to a registry. |
+| `remove` | Remove a specific entry from a manifest list. |
+| `rm` | Delete an entire manifest list from local storage. |
+
+## manifest create
+
+Creates a new, empty manifest list in local storage. The name is typically a full registry reference so it can be pushed later.
+
+```bash
+# Create an empty manifest list
+podman manifest create example.com/myapp:latest
+
+# Create a manifest list and immediately add a local image to it
+podman manifest create --all example.com/myapp:latest docker.io/library/alpine:latest
+```
+
+<Note>
+The `--all` flag adds all images referenced by the source (including any existing manifest list entries) rather than just the top-level reference.
+</Note>
+
+## manifest add
+
+Adds an image to an existing manifest list. The first argument is the manifest list, the second is the image to add. The image can be local or a remote registry reference.
+
+### Key flags
+
+<AccordionGroup>
+  <Accordion title="--arch">
+    Explicitly set the architecture for this entry (overrides what is in the image's config).
+
+    ```bash
+    podman manifest add --arch arm64 myapp:latest docker://myapp:arm64
+    ```
+  </Accordion>
+
+  <Accordion title="--os">
+    Explicitly set the OS for this entry.
+
+    ```bash
+    podman manifest add --os linux myapp:latest docker://myapp:amd64
+    ```
+  </Accordion>
+
+  <Accordion title="--variant">
+    Set the CPU variant (e.g., `v7` or `v8` for ARM).
+
+    ```bash
+    podman manifest add --arch arm --variant v7 myapp:latest docker://myapp:armv7
+    ```
+  </Accordion>
+
+  <Accordion title="--all">
+    Add all images from the source manifest list, rather than only the image for the current platform.
+
+    ```bash
+    podman manifest add --all myapp:latest docker://upstream:latest
+    ```
+  </Accordion>
+</AccordionGroup>
+
+### Examples
+
+```bash
+# Add an amd64 image from a registry
+podman manifest add myapp:latest docker://example.com/myapp:amd64
+
+# Add an arm64 image
+podman manifest add myapp:latest docker://example.com/myapp:arm64
+
+# Add with explicit platform metadata
+podman manifest add --arch arm64 --os linux myapp:latest docker://example.com/myapp:arm64
+```
+
+## manifest inspect
+
+Displays the raw manifest list JSON, including all referenced images, their digests, and platform metadata.
+
+```bash
+# Inspect a local manifest list
+podman manifest inspect myapp:latest
+
+# Inspect a remote manifest list
+podman manifest inspect docker://docker.io/library/nginx:latest
+```
+
+## manifest push
+
+Pushes a manifest list and all its referenced images to a registry.
+
+<Warning>
+Always use `--all` when pushing a manifest list. Without it, Podman pushes only the native platform image, not the full manifest list. The result on the registry will not be a multi-arch manifest.
+</Warning>
+
+```bash
+# Push the full manifest list (required: --all)
+podman manifest push --all myapp:latest example.com/myapp:latest
+
+# Push with a specific credential store
+podman manifest push --all --creds user:password myapp:latest example.com/myapp:latest
+
+# Push using an authfile
+podman manifest push --all --authfile ~/.config/containers/auth.json \
+  myapp:latest example.com/myapp:latest
+```
+
+## Common workflows
+
+### Build a multi-arch manifest list from a Containerfile
+
+Building for non-native architectures requires a way to execute non-native binaries (e.g., `qemu-user-static` on Linux). The `--jobs` flag enables parallel builds.
+
+```bash
+platarch=linux/amd64,linux/arm64,linux/ppc64le,linux/s390x
+podman build \
+  --jobs 4 \
+  --platform $platarch \
+  --manifest example.com/myapp:latest \
+  .
+```
+
+<Note>
+Do not use `--tag` / `-t` together with `--manifest` in `podman build`. The `--manifest` flag already names the resulting manifest list.
+</Note>
+
+### Assemble a manifest list from separately pushed images
+
+```bash
+REPO=example.com/myapp
+
+# Create the empty manifest list
+podman manifest create $REPO:latest
+
+# Add each architecture's image
+for arch in amd64 arm64 ppc64le s390x; do
+  podman manifest add $REPO:latest docker://$REPO:$arch
+done
+
+# Push the full list
+podman manifest push --all $REPO:latest
+```
+
+### Rename and push a locally built manifest
+
+```bash
+# Tag the local manifest list for the target registry
+podman tag localhost/myapp:latest example.com/myapp:v1.0
+
+# Remove the local name (frees the tag for re-use)
+podman manifest rm localhost/myapp:latest
+
+# Push under the new name
+podman manifest push --all example.com/myapp:v1.0
+```
+
+### Inspect a remote multi-arch image
+
+```bash
+# See all platforms offered by an upstream image
+podman manifest inspect docker://docker.io/library/nginx:latest \
+  | jq '[.manifests[] | {platform: .platform, digest: .digest}]'
+```

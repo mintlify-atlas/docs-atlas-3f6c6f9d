@@ -1,0 +1,263 @@
+---
+title: "Using Podman kube to generate and play Kubernetes YAML"
+description: "Use podman kube generate and podman kube play to convert Podman containers and pods to Kubernetes YAML and replay them locally or in a cluster."
+---
+
+Podman can both export running containers and pods as Kubernetes YAML and consume that YAML to recreate workloads locally. This lets you prototype container definitions with familiar Podman commands, capture them as portable Kubernetes manifests, and replay them on any system running Podman or a real Kubernetes cluster.
+
+## Supported Kubernetes resource kinds
+
+`podman kube play` can consume the following Kubernetes resource types:
+
+- **Pod**
+- **Deployment** (replica count is accepted but clamped to 1)
+- **DaemonSet**
+- **Job**
+- **PersistentVolumeClaim**
+- **ConfigMap**
+- **Secret**
+
+<Note>
+Fields marked N/A in the Kubernetes spec (such as `nodeSelector`, `affinity`, and `tolerations`) cannot be supported in a single-node Podman environment and are silently ignored.
+</Note>
+
+## Example workflow: container → YAML → play
+
+<Steps>
+  <Step title="Run a container">
+    Start a MariaDB container with a named volume and a published port:
+
+    ```bash
+    podman run -d \
+      --name some-mariadb \
+      -e MARIADB_ROOT_PASSWORD=secret \
+      -p 3306:3306 \
+      -v mariadb_data:/var/lib/mysql \
+      docker.io/library/mariadb:10.11
+    ```
+  </Step>
+
+  <Step title="Generate Kubernetes YAML">
+    Export the running container as a Kubernetes Pod manifest:
+
+    ```bash
+    podman kube generate some-mariadb -f mariadb-pod.yaml
+    ```
+
+    The generated file looks similar to this:
+
+    ```yaml
+    apiVersion: v1
+    kind: Pod
+    metadata:
+      creationTimestamp: "2024-01-09T02:24:55Z"
+      labels:
+        app: some-mariadb-pod
+      name: some-mariadb-pod
+    spec:
+      containers:
+      - args:
+        - mariadbd
+        env:
+        - name: MARIADB_ROOT_PASSWORD
+          value: secret
+        image: docker.io/library/mariadb:10.11
+        name: some-mariadb
+        ports:
+        - containerPort: 3306
+          hostPort: 3306
+        volumeMounts:
+        - mountPath: /var/lib/mysql
+          name: mariadb_data-pvc
+      volumes:
+      - name: mariadb_data-pvc
+        persistentVolumeClaim:
+          claimName: mariadb_data
+    ```
+
+    Named volumes become `persistentVolumeClaim` entries. Bind-mounted host directories become `hostPath` entries.
+  </Step>
+
+  <Step title="Tear down the original container">
+    ```bash
+    podman rm -f some-mariadb
+    ```
+  </Step>
+
+  <Step title="Recreate from YAML with kube play">
+    ```bash
+    podman kube play mariadb-pod.yaml
+    ```
+
+    Podman reads the manifest, creates the volume if it does not exist, pulls the image if needed, and starts the pod.
+  </Step>
+
+  <Step title="Tear down with kube down">
+    To stop and remove all resources created by a manifest, pass the same file with `--down`:
+
+    ```bash
+    podman kube play --down mariadb-pod.yaml
+    ```
+
+    Alternatively, use the dedicated subcommand:
+
+    ```bash
+    podman kube down mariadb-pod.yaml
+    ```
+  </Step>
+</Steps>
+
+## Generating different resource types
+
+Use `--type` to generate a `Deployment`, `DaemonSet`, or `Job` instead of the default `Pod`:
+
+```bash
+# Deployment with 3 replicas
+podman kube generate --type deployment --replicas 3 my-container
+
+# DaemonSet
+podman kube generate --type daemonset my-container
+
+# Job
+podman kube generate --type job my-container
+```
+
+To also generate a `Service` object (useful when the container has published ports):
+
+```bash
+podman kube generate --service my-container -f my-app.yaml
+```
+
+## Playing YAML from a URL
+
+`podman kube play` accepts a URL in addition to a local file path:
+
+```bash
+podman kube play https://podman.io/demo.yml
+```
+
+## Replacing a running deployment
+
+Use `--replace` to tear down the existing pods and recreate them in one step:
+
+```bash
+podman kube play --replace my-app.yaml
+```
+
+## Volume types supported by kube play
+
+<AccordionGroup>
+  <Accordion title="hostPath">
+    Maps a path on the host into the container. Supported subtypes: `DirectoryOrCreate`, `Directory`, `FileOrCreate`, `File`, `Socket`, `CharDevice`, and `BlockDevice`. A value with no forward slash is treated as a named volume name.
+  </Accordion>
+  <Accordion title="emptyDir">
+    Podman creates an anonymous volume that is removed when the pod is deleted.
+  </Accordion>
+  <Accordion title="configMap">
+    Podman creates an anonymous volume populated from the referenced ConfigMap. The volume is removed with the pod.
+  </Accordion>
+  <Accordion title="persistentVolumeClaim">
+    The `claimName` field maps directly to a Podman named volume. Podman creates the volume if it does not already exist.
+  </Accordion>
+  <Accordion title="image">
+    Creates a read-only image volume. The image must already exist locally. Supported in rootful mode only.
+  </Accordion>
+</AccordionGroup>
+
+## Supported pod and container fields
+
+The tables below reflect the fields that `podman kube play` supports. **✅** means supported, **no** means not supported, **N/A** means the concept does not apply to a single-node environment.
+
+### Selected pod spec fields
+
+| Field | Support |
+|-------|---------|
+| `containers` | ✅ |
+| `initContainers` | ✅ |
+| `volumes` | ✅ |
+| `restartPolicy` | ✅ |
+| `terminationGracePeriodSeconds` | ✅ |
+| `hostname` | ✅ |
+| `hostAliases` | ✅ |
+| `dnsConfig` | ✅ |
+| `hostNetwork` | ✅ |
+| `hostPID` | ✅ |
+| `hostIPC` | ✅ |
+| `shareProcessNamespace` | ✅ |
+| `securityContext.runAsUser` | ✅ |
+| `securityContext.runAsGroup` | ✅ |
+| `securityContext.supplementalGroups` | ✅ |
+| `securityContext.seLinuxOptions` | ✅ |
+| `securityContext.sysctls` | ✅ |
+| `nodeSelector` | N/A |
+| `affinity` | N/A |
+| `tolerations` | N/A |
+
+### Selected container spec fields
+
+| Field | Support |
+|-------|---------|
+| `name` | ✅ |
+| `image` | ✅ |
+| `imagePullPolicy` | ✅ |
+| `command` / `args` | ✅ |
+| `workingDir` | ✅ |
+| `ports` | ✅ |
+| `env` (literal and `valueFrom`) | ✅ |
+| `envFrom` (ConfigMap and Secret) | ✅ |
+| `volumeMounts` | ✅ |
+| `resources.limits` / `resources.requests` | ✅ |
+| `livenessProbe` | ✅ |
+| `securityContext.privileged` | ✅ |
+| `securityContext.capabilities` | ✅ |
+| `securityContext.readOnlyRootFilesystem` | ✅ |
+| `securityContext.seLinuxOptions` | ✅ |
+| `readinessProbe` | no |
+| `startupProbe` | no |
+| `stdin` / `tty` | no |
+
+<Tip>
+The `podman play kube` command is a legacy alias for `podman kube play` and behaves identically.
+</Tip>
+
+## SELinux considerations for volumes
+
+When generating YAML from a rootless container on an SELinux-enabled host, volume access in a Kubernetes cluster requires one of the following:
+
+```yaml
+# Option 1: add privileged to the pod spec
+securityContext:
+  privileged: true
+
+# Option 2: set the SELinux type explicitly
+securityContext:
+  seLinuxOptions:
+    type: spc_t
+```
+
+Or relabel the directory on the host before deploying:
+
+```bash
+chcon -t container_file_t -R /path/to/volume
+```
+
+## Building images on the fly
+
+If the image name in the YAML matches a directory in the current working directory that contains a `Containerfile` or `Dockerfile`, `podman kube play` builds the image automatically before starting the pod:
+
+```
+myplayfile.yaml
+foobar/
+  Containerfile
+```
+
+```yaml
+spec:
+  containers:
+  - name: container
+    image: foobar
+```
+
+<Note>
+On-the-fly image builds are not available for remote clients, including Mac and Windows hosts (excluding WSL2).
+</Note>

@@ -1,0 +1,138 @@
+---
+title: "podman build — Build images from a Containerfile"
+description: 'Build a container image from a Containerfile or Dockerfile with a build context, supporting multi-arch targets, build arguments, and layer caching.'
+---
+
+`podman build` reads instructions from a Containerfile (or Dockerfile) and a build context directory to produce a new container image. It uses code from the [Buildah](https://github.com/containers/buildah) project internally and does not require a daemon. The build context can be a local directory path, an HTTP/HTTPS URL pointing to an archive or Containerfile, or a Git repository URL.
+
+## Synopsis
+
+```bash
+podman build [options] [context]
+podman image build [options] [context]
+```
+
+## Description
+
+A Containerfile uses the same syntax as a Dockerfile. Podman looks for a file named `Containerfile` or `Dockerfile` in the build context by default — files with additional extensions (e.g., `Containerfile.prod`) are not picked up automatically unless you specify them with `-f`. Files ending in `.in` are preprocessed through the C preprocessor (CPP), which enables `#include` directives to compose reusable fragments.
+
+<Note>
+  `podman buildx build` is an alias for `podman build` provided for scripting compatibility. Not all BuildKit features are available.
+</Note>
+
+<Warning>
+  If a build crashes or is killed, Buildah working containers may be left behind in container storage. Run `podman ps --all --external` to find and remove them.
+</Warning>
+
+## Containerfile format
+
+A minimal Containerfile looks like this:
+
+```dockerfile
+FROM docker.io/library/alpine:3.19
+
+# Install dependencies
+RUN apk add --no-cache curl
+
+# Copy application files
+COPY app/ /app/
+
+WORKDIR /app
+EXPOSE 8080
+CMD ["/app/server"]
+```
+
+Supported instructions include `FROM`, `RUN`, `COPY`, `ADD`, `ENV`, `ARG`, `WORKDIR`, `EXPOSE`, `VOLUME`, `USER`, `ENTRYPOINT`, `CMD`, `LABEL`, `ONBUILD`, `STOPSIGNAL`, and `HEALTHCHECK`.
+
+## Key flags
+
+<ParamField path="--file" type="string">
+  **Alias: `-f`**. Path or URL to the Containerfile to use. Specify `-f -` to read from stdin. When more than one file is given, `FROM` instructions are accepted only from the last file. If no build context is given and the file is local, its parent directory becomes the context.
+</ParamField>
+
+<ParamField path="--tag" type="string">
+  **Alias: `-t`**. Name (and optionally a tag in `name:tag` format) to assign to the built image. If no registry is included in the name, `localhost` is prepended automatically. Can be specified multiple times to tag the image with several names.
+</ParamField>
+
+<ParamField path="--build-arg" type="string">
+  Pass a build-time variable as `key=value`. The value is available inside the Containerfile as an `ARG` variable. Build args are not persisted in the final image's environment.
+</ParamField>
+
+<ParamField path="--no-cache" type="boolean">
+  Disable the layer cache entirely — every step is executed from scratch. Useful to ensure a clean build when upstream packages or base images have changed.
+</ParamField>
+
+<ParamField path="--layers" type="boolean" default="true">
+  Cache intermediate image layers during the build. Caching is on by default. Disable with `--layers=false` or set `BUILDAH_LAYERS=false` in the environment.
+</ParamField>
+
+<ParamField path="--platform" type="string">
+  Target platform(s) as `os/arch[/variant]`. Examples: `linux/amd64`, `linux/arm64`, `linux/arm/v7`. Specify multiple platforms by repeating the flag or with a comma-separated list. When more than one platform is specified, use `--manifest` instead of `--tag`. Overrides `--arch`, `--os`, and `--variant`.
+</ParamField>
+
+<ParamField path="--authfile" type="string">
+  Path to a JSON authentication file for pulling the base image. Defaults to `${XDG_RUNTIME_DIR}/containers/auth.json`.
+</ParamField>
+
+<ParamField path="--target" type="string">
+  Name of a multi-stage build stage to stop at. Only the layers up to and including the named stage are built.
+</ParamField>
+
+## Examples
+
+Build using a `Containerfile` in the current directory and tag the result:
+
+```bash
+podman build -t myapp:latest .
+```
+
+Build with an explicit Containerfile path:
+
+```bash
+podman build -f ./build/Containerfile -t myapp:dev .
+```
+
+Pass build arguments:
+
+```bash
+podman build \
+  --build-arg VERSION=1.2.3 \
+  --build-arg COMMIT_SHA=abc123 \
+  -t myapp:1.2.3 .
+```
+
+Build without using the layer cache:
+
+```bash
+podman build --no-cache -t myapp:fresh .
+```
+
+Build a multi-architecture image for AMD64 and ARM64:
+
+```bash
+podman build \
+  --platform linux/amd64,linux/arm64 \
+  --manifest myapp:multi .
+```
+
+Build from a remote Git repository:
+
+```bash
+podman build -t myapp:git https://github.com/myorg/myapp.git
+```
+
+Build a specific stage in a multi-stage Containerfile:
+
+```bash
+podman build --target builder -t myapp:builder .
+```
+
+Read the Containerfile from stdin:
+
+```bash
+cat Containerfile | podman build -f - -t myapp:stdin .
+```
+
+<Tip>
+  Layer caching is controlled by the `BUILDAH_LAYERS` environment variable as well as the `--layers` flag. Export `BUILDAH_LAYERS=false` to disable caching globally without passing the flag each time.
+</Tip>

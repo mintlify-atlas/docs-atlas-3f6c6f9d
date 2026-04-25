@@ -1,0 +1,189 @@
+---
+title: "podman system — Manage the Podman host environment"
+description: "Reference for podman system subcommands. View system info, report disk usage, run the REST API service, prune unused resources, and reset storage."
+---
+
+The `podman system` family of commands manages Podman at the installation level rather than at the level of individual containers or images. These commands cover disk usage reporting, the REST API service, system-wide pruning, storage consistency checks, configuration migration, and full storage resets. Most of these commands affect all containers, images, volumes, and networks in the current user's storage.
+
+## Subcommands
+
+| Subcommand | Description |
+|---|---|
+| `check` | Perform consistency checks on image and container storage. |
+| `connection` | Manage remote Podman service connections. |
+| `df` | Show disk usage for images, containers, and volumes. |
+| `events` | Monitor Podman events in real time. |
+| `info` | Display Podman system information (host, store, registries). |
+| `migrate` | Migrate existing containers to a new Podman version. |
+| `prune` | Remove all unused pods, containers, images, networks, and volumes. |
+| `renumber` | Migrate lock numbers after changing the maximum lock count. |
+| `reset` | Reset all storage back to the initial state. |
+| `service` | Run the Podman REST API service. |
+
+## system info
+
+Prints a comprehensive summary of the Podman environment: version, OS, storage driver, registries, and available OCI runtimes.
+
+```bash
+# Human-readable output
+podman system info
+
+# Machine-readable JSON
+podman system info --format json
+
+# Extract a single field
+podman system info --format '{{.Host.Arch}}'
+```
+
+## system df
+
+Shows how much disk space is used by images, containers, volumes, and build cache — similar to `docker system df`.
+
+```bash
+# Summary table
+podman system df
+
+# Verbose output showing each object
+podman system df --verbose
+```
+
+Sample output columns: `TYPE`, `TOTAL`, `ACTIVE`, `SIZE`, `RECLAIMABLE`.
+
+## system prune
+
+Removes all unused resources: stopped containers, dangling and unused images, unused networks, and optionally unused volumes.
+
+<Warning>
+`podman system prune` is destructive. By default it does not remove named volumes; add `--volumes` to include them. Add `--all` to remove all images that are not currently used by a container (not just dangling ones).
+</Warning>
+
+```bash
+# Prune all unused resources (prompts for confirmation)
+podman system prune
+
+# Include unused volumes
+podman system prune --volumes
+
+# Include all unused images (not just dangling)
+podman system prune --all
+
+# Skip the confirmation prompt
+podman system prune --force
+
+# Full cleanup
+podman system prune --all --volumes --force
+```
+
+## system service
+
+Starts the Podman REST API service. The API has two layers: a Docker v1.40 compatibility API and a native Libpod API. On Linux systems with systemd, the service is typically managed via socket activation using `podman.socket`.
+
+<Note>
+`podman system service` is only available on Linux. It is not available when Podman is used as a client connecting to a remote service.
+</Note>
+
+### Key flags
+
+<AccordionGroup>
+  <Accordion title="--time / -t">
+    Inactivity timeout in seconds before the service exits. Set to `0` for no timeout (run indefinitely). Defaults to `5`.
+
+    ```bash
+    podman system service --time 0
+    ```
+  </Accordion>
+
+  <Accordion title="--tls-cert / --tls-key / --tls-client-ca">
+    Paths to PEM files for TLS mutual authentication. Use these when exposing the API over TCP.
+
+    ```bash
+    podman system service \
+      --tls-cert /etc/podman/server.crt \
+      --tls-key /etc/podman/server.key \
+      --tls-client-ca /etc/podman/ca.crt \
+      tcp://0.0.0.0:8080
+    ```
+  </Accordion>
+</AccordionGroup>
+
+<Warning>
+The REST API grants full Podman access to whoever can connect to the socket. Never expose the API over TCP without mutual TLS. Even localhost access carries risk — prefer SSH forwarding for remote access.
+</Warning>
+
+### Examples
+
+```bash
+# Start via systemd socket (recommended for rootless)
+systemctl --user enable --now podman.socket
+
+# Point Docker tooling at Podman
+export DOCKER_HOST=unix://$XDG_RUNTIME_DIR/podman/podman.sock
+docker-compose up
+
+# Start the rootful API socket via systemd
+sudo systemctl enable --now podman.socket
+
+# Run the service directly with a 30-second timeout
+podman system service --time 30
+
+# Run on a custom socket path with no timeout
+podman system service --time 0 unix:///var/run/mypodman.sock
+
+# Enable the rootless socket to start at login
+systemctl --user enable podman.socket
+loginctl enable-linger $USER
+```
+
+## system reset
+
+Removes all containers, pods, images, networks, and volumes — returning Podman's storage to a clean initial state.
+
+<Warning>
+`podman system reset` is irreversible. All container data, images pulled or built locally, named volumes, and custom networks are permanently deleted. Only use this when you intentionally want a completely clean slate.
+</Warning>
+
+```bash
+# Reset all storage (prompts for confirmation)
+podman system reset
+
+# Skip the confirmation prompt
+podman system reset --force
+```
+
+## system check
+
+Performs consistency checks on the image and container storage, and optionally repairs inconsistencies it finds.
+
+```bash
+# Run a storage consistency check
+podman system check
+
+# Check and repair detected issues
+podman system check --repair
+
+# Check and remove unreferenced layers
+podman system check --repair --max 0
+```
+
+## Common workflows
+
+```bash
+# Inspect the environment before a deployment
+podman system info --format json | jq .Host
+
+# Check disk usage and reclaim space
+podman system df
+podman system prune --all --volumes --force
+podman system df  # verify space recovered
+
+# Set up rootless API socket for docker-compose
+systemctl --user enable --now podman.socket
+export DOCKER_HOST=unix://$XDG_RUNTIME_DIR/podman/podman.sock
+docker-compose -f docker-compose.yml up -d
+
+# Migrate storage after a major Podman upgrade
+podman system migrate
+
+# Nuclear option: clean slate
+podman system reset --force
+```

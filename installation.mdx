@@ -1,0 +1,274 @@
+---
+title: "How to Install Podman on Linux, macOS, and Windows"
+description: "Step-by-step instructions to install Podman on Fedora, RHEL, Ubuntu, Debian, Arch Linux, macOS via Homebrew, and Windows via winget or the MSI installer."
+---
+
+Podman runs natively on Linux. On macOS and Windows, Podman manages a lightweight Linux virtual machine called a Podman machine that provides a Linux kernel for running containers, with the `podman` CLI on your host talking to the guest seamlessly over SSH.
+
+<Note>
+  The authoritative and most up-to-date installation instructions are maintained at [podman.io/docs/installation](https://podman.io/docs/installation). The commands below reflect stable installation paths for common platforms.
+</Note>
+
+## Install Podman
+
+<Tabs>
+  <Tab title="Linux">
+    Podman is available in the default package repositories of most major Linux distributions. Choose your distribution below.
+
+    <Tabs>
+      <Tab title="Fedora / RHEL / CentOS">
+        On Fedora, Red Hat Enterprise Linux 8+, and CentOS Stream, Podman is available in the default repositories:
+
+        ```bash
+        sudo dnf install podman
+        ```
+
+        On RHEL 7 and CentOS 7, enable the `extras` repository first:
+
+        ```bash
+        sudo yum -y install podman
+        ```
+
+        <Tip>
+          Fedora ships a recent Podman release. On RHEL, the version tracks the RHEL lifecycle. To get the latest upstream release, use the [Kubic repository](https://podman.io/docs/installation).
+        </Tip>
+      </Tab>
+      <Tab title="Ubuntu / Debian">
+        Podman is available in the Ubuntu universe repository (Ubuntu 20.10+) and in Debian stable:
+
+        ```bash
+        sudo apt update
+        sudo apt install podman
+        ```
+
+        For a more recent release on Ubuntu 20.04 LTS or Debian, add the Kubic repository:
+
+        ```bash
+        # Ubuntu 20.04
+        echo "deb https://download.opensuse.org/repositories/devel:/kubic:/libcontainers:/stable/xUbuntu_20.04/ /" \
+          | sudo tee /etc/apt/sources.list.d/devel:kubic:libcontainers:stable.list
+        curl -fsSL https://download.opensuse.org/repositories/devel:kubic:libcontainers:stable/xUbuntu_20.04/Release.key \
+          | sudo gpg --dearmor -o /etc/apt/trusted.gpg.d/devel_kubic_libcontainers_stable.gpg
+        sudo apt update
+        sudo apt install podman
+        ```
+      </Tab>
+      <Tab title="Arch Linux">
+        Podman is available in the Arch community repository:
+
+        ```bash
+        sudo pacman -S podman
+        ```
+
+        For rootless operation, also install the shadow-utils sub-uid/sub-gid tools:
+
+        ```bash
+        sudo pacman -S shadow
+        ```
+      </Tab>
+      <Tab title="openSUSE">
+        On openSUSE Tumbleweed and Leap:
+
+        ```bash
+        sudo zypper install podman
+        ```
+      </Tab>
+    </Tabs>
+
+    After installation, verify Podman is available:
+
+    ```bash
+    podman version
+    ```
+
+    You should see output similar to:
+
+    ```text
+    Client:       Podman Engine
+    Version:      5.x.x
+    API Version:  5.x.x
+    Go Version:   go1.x.x
+    Built:        ...
+    OS/Arch:      linux/amd64
+    ```
+
+    <Note>
+      Rootless Podman requires that your system has `/etc/subuid` and `/etc/subgid` entries for your user. Most distributions configure these automatically when you create a user account. See the [rootless guide](/advanced/rootless) if you encounter permission errors.
+    </Note>
+  </Tab>
+
+  <Tab title="macOS">
+    On macOS, Podman provides a native CLI that communicates with a Linux virtual machine managed by `podman machine`. The machine is required because containers need a Linux kernel.
+
+    <Steps>
+      <Step title="Install Podman via Homebrew">
+        The recommended way to install Podman on macOS is through [Homebrew](https://brew.sh):
+
+        ```bash
+        brew install podman
+        ```
+
+        This installs the `podman` client binary. You still need to initialize a Podman machine before you can run containers.
+      </Step>
+
+      <Step title="Initialize a Podman machine">
+        Create the default Linux virtual machine. This downloads a Fedora CoreOS image and sets up the guest environment:
+
+        ```bash
+        podman machine init
+        ```
+
+        The init process pulls a machine image from `quay.io/podman/machine-os` and may take a few minutes on first run.
+      </Step>
+
+      <Step title="Start the Podman machine">
+        Start the virtual machine so that the Podman socket is available:
+
+        ```bash
+        podman machine start
+        ```
+
+        You should see output confirming the machine started and the API socket is listening.
+      </Step>
+
+      <Step title="Verify the installation">
+        Confirm the CLI can communicate with the running machine:
+
+        ```bash
+        podman version
+        ```
+
+        The output lists both the client version (macOS binary) and the server version (guest Linux):
+
+        ```text
+        Client:       Podman Engine
+        Version:      5.x.x
+        API Version:  5.x.x
+        ...
+        Server:       Podman Engine
+        Version:      5.x.x
+        ...
+        ```
+      </Step>
+    </Steps>
+
+    <Tip>
+      To start the Podman machine automatically at login, see the [Podman macOS autostart guide](https://github.com/containers/podman/blob/main/docs/tutorials/macos_autostart.md) which documents the launchd approach.
+    </Tip>
+
+    <Warning>
+      The Podman machine runs containers in rootless mode by default. Binding ports below 1024 requires switching to rootful mode: `podman machine stop && podman machine set --rootful && podman machine start`.
+    </Warning>
+  </Tab>
+
+  <Tab title="Windows">
+    On Windows, Podman uses a Linux virtual machine backed by WSLv2 or Hyper-V. The `podman.exe` client on Windows communicates with the Podman service in the guest.
+
+    **Prerequisites**
+
+    - Windows 11 or later
+    - Hardware virtualization enabled in BIOS/UEFI
+    - WSLv2 installed (or Hyper-V on Windows Enterprise/Pro/Education)
+
+    Install WSL if it is not already present by running the following from an administrator PowerShell prompt:
+
+    ```powershell
+    wsl --install
+    ```
+
+    <Steps>
+      <Step title="Install Podman">
+        <Tabs>
+          <Tab title="winget">
+            Install using the Windows Package Manager:
+
+            ```powershell
+            winget install -e --id RedHat.Podman
+            ```
+          </Tab>
+          <Tab title="MSI installer">
+            Download the MSI installer from the [Podman releases page](https://github.com/containers/podman/releases). Choose a Podman 6.0 or later release and download the `.msi` file matching your architecture (e.g., `podman-installer-windows-amd64.msi`).
+
+            Double-click the installer. It supports both user-scope (no admin required) and machine-scope (admin required, installs for all users) installations.
+
+            After installation, relaunch a new terminal to pick up the updated PATH.
+          </Tab>
+        </Tabs>
+      </Step>
+
+      <Step title="Initialize a Podman machine">
+        Open PowerShell or Command Prompt and initialize the default machine:
+
+        ```powershell
+        podman machine init
+        ```
+
+        This pulls a Fedora-based OCI image and imports it into WSL (or creates a Hyper-V VM). The process looks like:
+
+        ```text
+        Looking up Podman Machine image at quay.io/podman/machine-os:6.0 to create VM
+        Getting image source signatures
+        ...
+        Machine init complete
+        To start your machine run:
+
+                podman machine start
+        ```
+      </Step>
+
+      <Step title="Start the Podman machine">
+        ```powershell
+        podman machine start
+        ```
+
+        On success, the machine reports that the API socket is available:
+
+        ```text
+        Starting machine "podman-machine-default"
+
+        This machine is currently configured in rootless mode. If your containers
+        require root permissions (e.g. ports < 1024), or if you run into compatibility
+        issues with non-podman clients, you can switch using the following command:
+
+                podman machine set --rootful
+
+        API forwarding listening on: npipe:////./pipe/docker_engine
+
+        Docker API clients default to this address. You do not need to set DOCKER_HOST.
+        Machine "podman-machine-default" started successfully
+        ```
+      </Step>
+
+      <Step title="Verify the installation">
+        ```powershell
+        podman version
+        ```
+
+        A successful response shows both the Windows client and Linux server versions.
+      </Step>
+    </Steps>
+
+    <Note>
+      Docker API forwarding is enabled by default. Tools and SDKs that target the Docker socket will automatically connect to Podman without setting `DOCKER_HOST`.
+    </Note>
+
+    <Warning>
+      Rootless (default) and rootful containers on the Podman machine are isolated from each other. Running `podman ps` in one mode will not show containers started in the other. Ports below 1024 require rootful mode.
+    </Warning>
+  </Tab>
+</Tabs>
+
+## Podman Desktop
+
+If you prefer a graphical interface, [Podman Desktop](https://podman-desktop.io) is an official companion app for Linux, macOS, and Windows. It wraps the same `podman machine` backend and supports full container lifecycle management, image handling, pod management, and Kubernetes YAML workflows.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Pull an image and run your first container.
+  </Card>
+  <Card title="Rootless guide" icon="shield" href="/advanced/rootless">
+    Understand rootless execution and configure user namespaces.
+  </Card>
+</CardGroup>
